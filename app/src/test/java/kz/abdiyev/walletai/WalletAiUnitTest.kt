@@ -37,7 +37,7 @@ class WalletAiUnitTest {
         val cats = listOf(
             kz.abdiyev.walletai.domain.model.CategoryData(1, "Продукты", TransactionType.EXPENSE, "#EF5350", "shopping_cart")
         )
-        val result = BankStatementParser().parse("Magnum 3400 тг", cats, null, Currency.KZT, 0L)
+        val result = BankStatementParser().parse("Magnum 3400 тг", cats, null, Currency.KZT, 0L).lines
         assertTrue(result.isNotEmpty())
         assertEquals(3400.0, result.first().money.majorAmount, 0.01)
     }

@@ -21,7 +21,7 @@ class BankStatementParserTest {
             categories,
             null,
             Currency.KZT
-        )
+        ).lines
         assertEquals(1, result.size)
         assertEquals(3400.0, result.first().money.majorAmount)
     }
@@ -34,7 +34,7 @@ class BankStatementParserTest {
             categories,
             null,
             Currency.KZT
-        )
+        ).lines
         assertEquals(TransactionType.INCOME, result.first().type)
     }
 }
