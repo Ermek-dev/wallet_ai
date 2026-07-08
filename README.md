@@ -1,21 +1,49 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# WalletAI
 
-# Run and deploy your AI Studio app
+Личное Android-приложение учёта доходов и расходов: Kotlin, Jetpack Compose, Room, KMP-модуль `shared/`, Gemini API.
 
-This contains everything you need to run your app locally.
+## Возможности
 
-View your app in AI Studio: https://ai.studio/apps/56e782c9-f4ef-47e2-ab9e-ae3e99284df2
+- Учёт операций, категории, undo удаления
+- Голосовой ввод и импорт выписки (текст / PDF)
+- Аналитика расходов и доходов, экспорт CSV/PDF
+- ИИ-советник (Gemini) с офлайн-fallback
+- Профиль: валюта, тема, уведомления
 
-## Run Locally
+## Требования
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+- Android Studio (Koala+)
+- JDK 11+
+- Файл `.env` в корне проекта (см. `.env.example`)
 
+```env
+GEMINI_API_KEY=ваш_ключ
+```
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+## Сборка и тесты
+
+```bash
+./gradlew :app:assembleDebug
+./gradlew :shared:testAndroidHostTest :app:testDebugUnitTest
+./gradlew :app:installDebug
+```
+
+APK: `app/build/outputs/apk/debug/app-debug.apk`
+
+## Структура
+
+```
+app/       — Android UI, Room, DI (Koin)
+shared/    — KMP: domain, ML, Gemini (Ktor), unit-тесты
+docs/      — ARCHITECTURE.md, PLAN.md
+```
+
+## Документация
+
+- [PLAN.md](PLAN.md) — дорожная карта
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — слои и потоки данных
+- [AGENTS.md](AGENTS.md) — соглашения для разработки
+
+## Gitflow
+
+Ветка `develop` → feature-ветки → PR. Push и remote — вручную владельцем репозитория.
