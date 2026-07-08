@@ -1,7 +1,7 @@
 package kz.abdiyev.walletai
 
 import android.app.Application
-import kz.abdiyev.walletai.di.appModule
+import kz.abdiyev.walletai.di.appModules
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
@@ -21,7 +21,7 @@ class WalletAiApplication : Application() {
         startKoin {
             androidLogger()
             androidContext(this@WalletAiApplication)
-            modules(appModule)
+            modules(appModules)
         }
     }
 }
