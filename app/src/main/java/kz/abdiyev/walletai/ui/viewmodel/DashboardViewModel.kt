@@ -12,30 +12,51 @@ import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.MerchantRuleRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
 import kz.abdiyev.walletai.domain.repository.TransactionRepository
-import kz.abdiyev.walletai.ml.BankStatementParser
-import kz.abdiyev.walletai.ml.ParsedStatementLine
 import kz.abdiyev.walletai.ml.TransactionClassifier
 import kz.abdiyev.walletai.ml.VoiceInputParser
-import kz.abdiyev.walletai.util.MockDataProvider
+import kz.abdiyev.walletai.util.Clock
 import kz.abdiyev.walletai.util.PeriodFilter
+import kz.abdiyev.walletai.util.SystemClock
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 data class ParsedPreview(
-    val id: Long,
+    val id: Long = 0,
     val money: Money,
     val type: TransactionType,
     val description: String,
     val predictedCategoryId: Long,
-    val date: Long
+    val date: Long,
+    val isTransfer: Boolean = false,
+    val isDuplicate: Boolean = false
 )
+
+data class DashboardUiState(
+    val transactions: List<TransactionData> = emptyList(),
+    val categories: List<CategoryData> = emptyList(),
+    val currencyCode: String = Currency.KZT.code,
+    val selectedPeriod: Period = Period.MONTH,
+    val filteredTransactions: List<TransactionData> = emptyList(),
+    val voicePreview: ParsedPreview? = null
+)
+
+sealed interface DashboardEvent {
+    data class Deleted(val transaction: TransactionData) : DashboardEvent
+    data object SaveError : DashboardEvent
+    data class Info(val text: String) : DashboardEvent
+}
 
 class DashboardViewModel(
     private val transactionRepository: TransactionRepository,
@@ -43,50 +64,74 @@ class DashboardViewModel(
     private val settingsRepository: SettingsRepository,
     private val merchantRuleRepository: MerchantRuleRepository,
     private val classifier: TransactionClassifier,
-    private val bankStatementParser: BankStatementParser,
-    private val voiceInputParser: VoiceInputParser
+    private val voiceInputParser: VoiceInputParser,
+    private val clock: Clock = SystemClock
 ) : ViewModel() {
 
-    val categories = categoryRepository.categories.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-    val transactions = transactionRepository.transactions.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-    val currencyCode = settingsRepository.currencyCode.stateIn(viewModelScope, SharingStarted.Lazily, Currency.KZT.code)
-    val onboardingDone = settingsRepository.onboardingDone.stateIn(viewModelScope, SharingStarted.Lazily, false)
-
     private val _selectedPeriod = MutableStateFlow(Period.MONTH)
-    val selectedPeriod: StateFlow<Period> = _selectedPeriod.asStateFlow()
-
-    val filteredTransactions: StateFlow<List<TransactionData>> = combine(transactions, selectedPeriod) { txs, period ->
-        PeriodFilter.filter(txs, period, System.currentTimeMillis())
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-
-    private val _parsedPreviews = MutableStateFlow<List<ParsedPreview>>(emptyList())
-    val parsedPreviews: StateFlow<List<ParsedPreview>> = _parsedPreviews.asStateFlow()
-
     private val _voicePreview = MutableStateFlow<ParsedPreview?>(null)
-    val voicePreview: StateFlow<ParsedPreview?> = _voicePreview.asStateFlow()
 
-    private val _snackbarMessage = MutableStateFlow<String?>(null)
-    val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
+    val uiState: StateFlow<DashboardUiState> = combine(
+        transactionRepository.transactions,
+        categoryRepository.categories,
+        settingsRepository.settings,
+        _selectedPeriod,
+        _voicePreview
+    ) { txs, cats, settings, period, voice ->
+        DashboardUiState(
+            transactions = txs,
+            categories = cats,
+            currencyCode = settings.currencyCode,
+            selectedPeriod = period,
+            filteredTransactions = PeriodFilter.filter(txs, period, clock.nowMillis()),
+            voicePreview = voice
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
 
-    private val _lastDeleted = MutableStateFlow<TransactionData?>(null)
-    val lastDeleted: StateFlow<TransactionData?> = _lastDeleted.asStateFlow()
+    private val _onboardingReady = MutableStateFlow<Boolean?>(null)
+    val onboardingReady: StateFlow<Boolean?> = _onboardingReady.asStateFlow()
+
+    private val _events = Channel<DashboardEvent>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
 
     private var trainedModel: TransactionClassifier.TrainedModel? = null
 
     private var lastUsedCategoryId: Long = 0L
 
-    init {
-        viewModelScope.launch {
-            categoryRepository.ensureDefaultCategories()
-            trainModel()
+    @OptIn(FlowPreview::class)
+    private fun observeAndTrainClassifier() {
+        // Training follows the data stream with a debounce instead of manual retrain
+        // calls after every insert; CPU work stays off the main dispatcher.
+        viewModelScope.launch(Dispatchers.Default) {
+            combine(transactionRepository.transactions, categoryRepository.categories, ::Pair)
+                .debounce(2_000)
+                .collect { (txs, cats) ->
+                    if (txs.isNotEmpty() && cats.isNotEmpty()) {
+                        trainedModel = classifier.train(txs, cats)
+                    }
+                }
         }
     }
 
-    private suspend fun trainModel() {
+    init {
+        viewModelScope.launch {
+            categoryRepository.ensureDefaultCategories()
+        }
+        viewModelScope.launch {
+            settingsRepository.settings.collect { settings ->
+                _onboardingReady.value = settings.onboardingDone
+            }
+        }
+        observeAndTrainClassifier()
+    }
+
+    /** Trains immediately when a classification is requested before the debounced stream fires. */
+    private suspend fun ensureModelTrained() {
+        if (trainedModel != null) return
         val txs = transactionRepository.getAll()
         val cats = categoryRepository.getAll()
         if (txs.isNotEmpty() && cats.isNotEmpty()) {
-            trainedModel = classifier.train(txs, cats)
+            trainedModel = withContext(Dispatchers.Default) { classifier.train(txs, cats) }
         }
     }
 
@@ -102,10 +147,9 @@ class DashboardViewModel(
                 transactionRepository.insert(
                     TransactionData(money = money, type = type, categoryId = categoryId, description = description, date = date)
                 )
-                trainModel()
             } catch (e: Exception) {
                 Timber.e(e, "Failed to add transaction")
-                _snackbarMessage.value = SNACKBAR_SAVE_ERROR
+                _events.trySend(DashboardEvent.SaveError)
             }
         }
     }
@@ -116,10 +160,9 @@ class DashboardViewModel(
         viewModelScope.launch {
             try {
                 transactionRepository.update(transaction)
-                trainModel()
             } catch (e: Exception) {
                 Timber.e(e, "Failed to update transaction")
-                _snackbarMessage.value = SNACKBAR_SAVE_ERROR
+                _events.trySend(DashboardEvent.SaveError)
             }
         }
     }
@@ -128,50 +171,32 @@ class DashboardViewModel(
         Timber.d("deleteTransaction: id=%d", transaction.id)
         viewModelScope.launch {
             try {
-                _lastDeleted.value = transaction
                 transactionRepository.delete(transaction)
-                trainModel()
-                _snackbarMessage.value = SNACKBAR_DELETED
+                _events.trySend(DashboardEvent.Deleted(transaction))
             } catch (e: Exception) {
                 Timber.e(e, "Failed to delete transaction")
             }
         }
     }
 
-    fun undoDelete() {
-        val tx = _lastDeleted.value ?: return
+    fun undoDelete(transaction: TransactionData) {
         viewModelScope.launch {
             try {
-                transactionRepository.insert(tx.copy(id = 0))
-                _lastDeleted.value = null
-                trainModel()
-                _snackbarMessage.value = null
+                transactionRepository.insert(transaction.copy(id = 0))
             } catch (e: Exception) {
                 Timber.e(e, "Failed to undo delete")
             }
         }
     }
 
-    fun clearSnackbar() {
-        _snackbarMessage.value = null
-    }
-
-    fun parseBankStatement(text: String) {
-        viewModelScope.launch {
-            if (trainedModel == null) trainModel()
-            val currency = Currency.fromCode(currencyCode.value)
-            val cats = categoryRepository.getAll()
-            val parsed = bankStatementParser.parse(text, cats, trainedModel, currency)
-            _parsedPreviews.value = parsed.map {
-                ParsedPreview(it.id, it.money, it.type, it.description, it.predictedCategoryId, it.date)
-            }
-        }
+    fun showMessage(text: String) {
+        _events.trySend(DashboardEvent.Info(text))
     }
 
     fun parseVoiceInput(text: String) {
         viewModelScope.launch {
-            if (trainedModel == null) trainModel()
-            val currency = Currency.fromCode(currencyCode.value)
+            ensureModelTrained()
+            val currency = Currency.fromCode(uiState.value.currencyCode)
             val result = voiceInputParser.parse(text, currency)
             val cats = categoryRepository.getAll()
             val ruleCat = merchantRuleRepository.findCategoryId(result.description)
@@ -179,59 +204,40 @@ class DashboardViewModel(
                 trainedModel?.let { model -> classifier.classify(result.description, model, cats) }
             } ?: cats.firstOrNull()?.id ?: 0L
             _voicePreview.value = ParsedPreview(
-                id = 1,
                 money = result.money ?: Money.fromMajor(0.0, currency),
                 type = result.type,
                 description = result.description,
                 predictedCategoryId = catId,
-                date = System.currentTimeMillis()
+                date = clock.nowMillis()
             )
         }
     }
 
-    fun updatePreviewCategory(previewId: Long, categoryId: Long) {
-        _parsedPreviews.value = _parsedPreviews.value.map {
-            if (it.id == previewId) it.copy(predictedCategoryId = categoryId) else it
-        }
+    fun updateVoicePreviewCategory(categoryId: Long) {
         _voicePreview.value = _voicePreview.value?.copy(predictedCategoryId = categoryId)
-    }
-
-    fun commitPreviews() {
-        val previews = _parsedPreviews.value
-        if (previews.isEmpty()) return
-        viewModelScope.launch {
-            transactionRepository.insertAll(previews.map {
-                TransactionData(
-                    money = it.money,
-                    type = it.type,
-                    categoryId = it.predictedCategoryId,
-                    description = it.description,
-                    date = it.date,
-                    isAutoCategorized = true
-                )
-            })
-            _parsedPreviews.value = emptyList()
-            trainModel()
-        }
     }
 
     fun commitVoicePreview() {
         val preview = _voicePreview.value ?: return
         if (preview.money.amountMinor <= 0) return
         viewModelScope.launch {
-            transactionRepository.insert(
-                TransactionData(
-                    money = preview.money,
-                    type = preview.type,
-                    categoryId = preview.predictedCategoryId,
-                    description = preview.description,
-                    date = preview.date,
-                    isAutoCategorized = true
+            try {
+                transactionRepository.insert(
+                    TransactionData(
+                        money = preview.money,
+                        type = preview.type,
+                        categoryId = preview.predictedCategoryId,
+                        description = preview.description,
+                        date = preview.date,
+                        isAutoCategorized = true
+                    )
                 )
-            )
-            merchantRuleRepository.saveRule(preview.description, preview.predictedCategoryId)
-            _voicePreview.value = null
-            trainModel()
+                merchantRuleRepository.saveRule(preview.description, preview.predictedCategoryId)
+                _voicePreview.value = null
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to commit voice preview")
+                _events.trySend(DashboardEvent.SaveError)
+            }
         }
     }
 
@@ -247,16 +253,14 @@ class DashboardViewModel(
                 )
                 merchantRuleRepository.saveRule(description, categoryId)
                 _voicePreview.value = null
-                trainModel()
             } catch (e: Exception) {
                 Timber.e(e, "Failed to commit edited voice preview")
-                _snackbarMessage.value = SNACKBAR_SAVE_ERROR
+                _events.trySend(DashboardEvent.SaveError)
             }
         }
     }
 
-    fun clearPreviews() {
-        _parsedPreviews.value = emptyList()
+    fun clearVoicePreview() {
         _voicePreview.value = null
     }
 
@@ -264,9 +268,8 @@ class DashboardViewModel(
         Timber.d("completeOnboarding: loadDemo=%s", loadDemo)
         viewModelScope.launch {
             try {
-                settingsRepository.setOnboardingDone(true)
-                if (loadDemo) {
-                    settingsRepository.setDemoLoaded(true)
+                settingsRepository.update { current ->
+                    current.copy(onboardingDone = true, demoLoaded = current.demoLoaded || loadDemo)
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to complete onboarding")
@@ -279,12 +282,5 @@ class DashboardViewModel(
             return lastUsedCategoryId
         }
         return categories.firstOrNull { it.type == type }?.id ?: categories.firstOrNull()?.id ?: 0L
-    }
-
-    suspend fun needsOnboarding(): Boolean = !settingsRepository.onboardingDone.first()
-
-    companion object {
-        const val SNACKBAR_DELETED = "deleted"
-        const val SNACKBAR_SAVE_ERROR = "save_error"
     }
 }

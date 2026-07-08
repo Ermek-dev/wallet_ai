@@ -1,6 +1,6 @@
 package kz.abdiyev.walletai.ui.theme
 
-import android.os.Build
+import kz.abdiyev.walletai.domain.model.ThemeMode
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -39,13 +39,13 @@ val LocalFinancialColors = staticCompositionLocalOf {
 
 @Composable
 fun WalletAiTheme(
-    themeMode: String = "system",
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themeMode) {
-        "dark" -> true
-        "light" -> false
-        else -> isSystemInDarkTheme()
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
     val financialColors = if (darkTheme) {

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kz.abdiyev.walletai.domain.model.Currency
+import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.model.Period
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
@@ -20,6 +21,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
 
+enum class AnalyticsChartMode {
+    EXPENSE,
+    INCOME
+}
+
 class AnalyticsViewModel(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
@@ -29,10 +35,13 @@ class AnalyticsViewModel(
 
     val categories = categoryRepository.categories.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val transactions = transactionRepository.transactions.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-    val currencyCode = settingsRepository.currencyCode.stateIn(viewModelScope, SharingStarted.Lazily, Currency.KZT.code)
+    val settings = settingsRepository.settings.stateIn(viewModelScope, SharingStarted.Lazily, Settings())
 
     private val _selectedPeriod = MutableStateFlow(Period.MONTH)
     val selectedPeriod: StateFlow<Period> = _selectedPeriod.asStateFlow()
+
+    private val _chartMode = MutableStateFlow(AnalyticsChartMode.EXPENSE)
+    val chartMode: StateFlow<AnalyticsChartMode> = _chartMode.asStateFlow()
 
     val filteredTransactions = combine(transactions, _selectedPeriod) { txs, period ->
         PeriodFilter.filter(txs, period, System.currentTimeMillis())
@@ -42,13 +51,17 @@ class AnalyticsViewModel(
         _selectedPeriod.value = period
     }
 
+    fun setChartMode(mode: AnalyticsChartMode) {
+        _chartMode.value = mode
+    }
+
     fun exportToCsv(context: Context, onComplete: (File) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             val file = exporter.exportToCsv(
                 context,
                 transactionRepository.getAll(),
                 categoryRepository.getAll(),
-                Currency.fromCode(currencyCode.value)
+                Currency.fromCode(settings.value.currencyCode)
             )
             onComplete(file)
         }

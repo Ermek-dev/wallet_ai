@@ -56,7 +56,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,36 +67,31 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Currency
-import kz.abdiyev.walletai.domain.model.TransactionData
+import kz.abdiyev.walletai.domain.model.ThemeMode
 import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.notification.ReminderScheduler
 import kz.abdiyev.walletai.ui.components.categoryColorOptions
 import kz.abdiyev.walletai.ui.components.categoryIconOptions
 import kz.abdiyev.walletai.ui.components.getCategoryIcon
 import kz.abdiyev.walletai.ui.viewmodel.ProfileViewModel
-import kz.abdiyev.walletai.util.MoneyFormatter
-import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
     viewModel: ProfileViewModel,
+    onNavigateToHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scheduler = remember { ReminderScheduler(context) }
 
-    val currencyCode by viewModel.currencyCode.collectAsStateWithLifecycle()
-    val userName by viewModel.userName.collectAsStateWithLifecycle()
-    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-    val notificationsEnabled by viewModel.notificationsEnabled.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
-    val historyQuery by viewModel.historyQuery.collectAsStateWithLifecycle()
-    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+
+    val currencyCode = settings.currencyCode
+    val userName = settings.userName
+    val themeMode = settings.themeMode
+    val notificationsEnabled = settings.notificationsEnabled
 
     var localUserName by remember(userName) { mutableStateOf(userName) }
     // Show the editor right away while the name is empty; otherwise start in view mode
@@ -106,10 +100,6 @@ fun ProfileScreen(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<CategoryData?>(null) }
     var showAddCategory by remember { mutableStateOf(false) }
-
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    val groupedHistory = remember(searchResults) { groupTransactionsByDay(searchResults) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -121,7 +111,7 @@ fun ProfileScreen(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        state = listState,
+        state = rememberLazyListState(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(bottom = 24.dp, top = 8.dp)
     ) {
@@ -194,7 +184,11 @@ fun ProfileScreen(
         item {
             SectionCard(title = "Тема") {
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    listOf("system" to "Системная", "light" to "Светлая", "dark" to "Тёмная").forEachIndexed { index, (mode, label) ->
+                    listOf(
+                        ThemeMode.SYSTEM to "Системная",
+                        ThemeMode.LIGHT to "Светлая",
+                        ThemeMode.DARK to "Тёмная"
+                    ).forEachIndexed { index, (mode, label) ->
                         SegmentedButton(
                             selected = themeMode == mode,
                             onClick = { viewModel.setThemeMode(mode) },
@@ -266,58 +260,16 @@ fun ProfileScreen(
         }
 
         item {
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            SectionCard(title = "История") {
                 Text(
-                    text = "История операций",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    text = "Полный список операций с поиском по описанию.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                TextButton(
-                    onClick = {
-                        scope.launch { listState.animateScrollToItem(4) }
-                    }
-                ) {
-                    Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Категории")
-                }
-            }
-            OutlinedTextField(
-                value = historyQuery,
-                onValueChange = viewModel::setHistoryQuery,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Поиск по описанию") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true
-            )
-        }
-
-        if (groupedHistory.isEmpty()) {
-            item {
-                Text(
-                    text = "Нет операций",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
-        } else {
-            groupedHistory.forEach { (dayLabel, txs) ->
-                item(key = "header-$dayLabel") {
-                    Text(
-                        text = dayLabel,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-                items(txs, key = { "history-${it.id}" }) { tx ->
-                    val category = categories.find { it.id == tx.categoryId }
-                    HistoryItem(transaction = tx, category = category)
+                Button(onClick = onNavigateToHistory, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Search, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Открыть историю")
                 }
             }
         }
@@ -563,66 +515,4 @@ private fun CategoryEditDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         }
     )
-}
-
-@Composable
-private fun HistoryItem(
-    transaction: TransactionData,
-    category: CategoryData?
-) {
-    val color = category?.let { parseColorHex(it.colorHex) } ?: MaterialTheme.colorScheme.outline
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(color)
-        )
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(transaction.description, fontWeight = FontWeight.Medium)
-            Text(
-                category?.name ?: "Другое",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Text(
-            MoneyFormatter.format(transaction.money, showSign = true, type = transaction.type),
-            fontWeight = FontWeight.Bold,
-            color = if (transaction.type == TransactionType.INCOME) {
-                androidx.compose.ui.graphics.Color(0xFF2E7D32)
-            } else {
-                androidx.compose.ui.graphics.Color(0xFFC62828)
-            }
-        )
-    }
-}
-
-private fun groupTransactionsByDay(transactions: List<TransactionData>): List<Pair<String, List<TransactionData>>> {
-    if (transactions.isEmpty()) return emptyList()
-    val dayFormat = SimpleDateFormat("d MMMM yyyy", Locale("ru"))
-    val today = Calendar.getInstance()
-    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
-
-    fun dayLabel(dateMillis: Long): String {
-        val cal = Calendar.getInstance().apply { timeInMillis = dateMillis }
-        return when {
-            cal.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
-                cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR) -> "Сегодня"
-            cal.get(Calendar.YEAR) == yesterday.get(Calendar.YEAR) &&
-                cal.get(Calendar.DAY_OF_YEAR) == yesterday.get(Calendar.DAY_OF_YEAR) -> "Вчера"
-            else -> dayFormat.format(Date(dateMillis))
-        }
-    }
-
-    return transactions
-        .groupBy { dayLabel(it.date) }
-        .toList()
-        .sortedByDescending { (_, txs) -> txs.maxOf { it.date } }
 }
