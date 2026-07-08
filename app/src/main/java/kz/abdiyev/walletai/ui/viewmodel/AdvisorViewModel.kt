@@ -2,6 +2,8 @@ package kz.abdiyev.walletai.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kz.abdiyev.walletai.ai.AdviceResult
+import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.repository.AdviceRepository
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
@@ -17,7 +19,7 @@ import kotlinx.coroutines.launch
 sealed class AdvisorUiState {
     data object Idle : AdvisorUiState()
     data object Loading : AdvisorUiState()
-    data class Success(val advice: String) : AdvisorUiState()
+    data class Success(val result: AdviceResult) : AdvisorUiState()
     data class Error(val message: String) : AdvisorUiState()
 }
 
@@ -28,7 +30,7 @@ class AdvisorViewModel(
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
-    val currencyCode = settingsRepository.currencyCode.stateIn(viewModelScope, SharingStarted.Lazily, "KZT")
+    val settings = settingsRepository.settings.stateIn(viewModelScope, SharingStarted.Lazily, Settings())
     private val _advisorState = MutableStateFlow<AdvisorUiState>(AdvisorUiState.Idle)
     val advisorState: StateFlow<AdvisorUiState> = _advisorState.asStateFlow()
 
@@ -36,12 +38,12 @@ class AdvisorViewModel(
         _advisorState.value = AdvisorUiState.Loading
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val advice = adviceRepository.generateAdvice(
+                val result = adviceRepository.generateAdvice(
                     transactionRepository.getAll(),
                     categoryRepository.getAll(),
-                    currencyCode.value
+                    settings.value.currencyCode
                 )
-                _advisorState.value = AdvisorUiState.Success(advice)
+                _advisorState.value = AdvisorUiState.Success(result)
             } catch (e: Exception) {
                 _advisorState.value = AdvisorUiState.Error(e.message ?: "Ошибка")
             }
@@ -51,13 +53,13 @@ class AdvisorViewModel(
     fun loadLocalFinancialAdvice() {
         _advisorState.value = AdvisorUiState.Loading
         viewModelScope.launch(Dispatchers.IO) {
-            val advice = adviceRepository.getFallbackAdvice(
+            val result = adviceRepository.localAdvice(
                 transactionRepository.getAll(),
                 categoryRepository.getAll(),
-                currencyCode.value,
+                settings.value.currencyCode,
                 "Ручной запуск"
             )
-            _advisorState.value = AdvisorUiState.Success(advice)
+            _advisorState.value = AdvisorUiState.Success(result)
         }
     }
 }

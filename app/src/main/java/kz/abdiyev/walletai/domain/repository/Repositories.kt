@@ -1,6 +1,8 @@
 package kz.abdiyev.walletai.domain.repository
 
+import kz.abdiyev.walletai.ai.AdviceResult
 import kz.abdiyev.walletai.domain.model.CategoryData
+import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kotlinx.coroutines.flow.Flow
 
@@ -26,30 +28,32 @@ interface CategoryRepository {
 }
 
 interface SettingsRepository {
-    val currencyCode: Flow<String>
-    val userName: Flow<String>
-    val themeMode: Flow<String>
-    val onboardingDone: Flow<Boolean>
-    val demoLoaded: Flow<Boolean>
-    val notificationsEnabled: Flow<Boolean>
-    val notificationHour: Flow<Int>
-    val biometricEnabled: Flow<Boolean>
-    suspend fun setCurrency(code: String)
-    suspend fun setUserName(name: String)
-    suspend fun setThemeMode(mode: String)
-    suspend fun setOnboardingDone(done: Boolean)
-    suspend fun setDemoLoaded(loaded: Boolean)
-    suspend fun setNotificationsEnabled(enabled: Boolean)
-    suspend fun setNotificationHour(hour: Int)
-    suspend fun setBiometricEnabled(enabled: Boolean)
+    val settings: Flow<Settings>
+    suspend fun update(transform: (Settings) -> Settings)
 }
 
 interface AdviceRepository {
-    suspend fun generateAdvice(transactions: List<TransactionData>, categories: List<CategoryData>, currencyCode: String): String
-    fun getFallbackAdvice(transactions: List<TransactionData>, categories: List<CategoryData>, currencyCode: String, reason: String): String
+    suspend fun generateAdvice(
+        transactions: List<TransactionData>,
+        categories: List<CategoryData>,
+        currencyCode: String
+    ): AdviceResult
+
+    fun localAdvice(
+        transactions: List<TransactionData>,
+        categories: List<CategoryData>,
+        currencyCode: String,
+        reason: String
+    ): AdviceResult.Fallback
 }
 
 interface MerchantRuleRepository {
     suspend fun findCategoryId(description: String): Long?
     suspend fun saveRule(merchantPattern: String, categoryId: Long)
+}
+
+/** Maintenance operations that need database-level access; keeps AppDatabase out of ViewModels. */
+interface MaintenanceRepository {
+    suspend fun loadDemoData()
+    suspend fun wipeAllData()
 }

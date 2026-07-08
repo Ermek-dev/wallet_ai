@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -40,6 +42,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kz.abdiyev.walletai.ai.AdviceResult
 import kz.abdiyev.walletai.ui.viewmodel.AdvisorUiState
 import kz.abdiyev.walletai.ui.viewmodel.AdvisorViewModel
 
@@ -180,12 +183,26 @@ fun AdvisorScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Рекомендации WalletAI",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Рекомендации WalletAI",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    if (state.result is AdviceResult.Fallback) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        AssistChip(
+                                            onClick = {},
+                                            enabled = false,
+                                            label = { Text("офлайн-анализ") },
+                                            colors = AssistChipDefaults.assistChipColors(
+                                                disabledContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                                disabledLabelColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                            )
+                                        )
+                                    }
+                                }
                                 IconButton(onClick = viewModel::loadAiFinancialAdvice) {
                                     Icon(
                                         Icons.Default.Refresh,
@@ -194,14 +211,32 @@ fun AdvisorScreen(
                                     )
                                 }
                             }
+                            if (state.result is AdviceResult.Fallback) {
+                                Text(
+                                    text = state.result.reason,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                             Text(
-                                text = state.advice,
+                                text = state.result.text,
                                 style = MaterialTheme.typography.bodyMedium,
                                 textAlign = TextAlign.Start,
                                 modifier = Modifier.fillMaxWidth(),
                                 lineHeight = 22.sp
                             )
+                            if (state.result is AdviceResult.Fallback) {
+                                Button(
+                                    onClick = viewModel::loadAiFinancialAdvice,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Повторить запрос к ИИ")
+                                }
+                            }
                         }
 
                         is AdvisorUiState.Error -> {
