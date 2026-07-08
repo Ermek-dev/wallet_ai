@@ -31,7 +31,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -61,7 +64,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,16 +90,18 @@ import java.util.Locale
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onLoadDemo: () -> Unit = {},
+    onNavigateToImport: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val categories by viewModel.categories.collectAsStateWithLifecycle()
-    val filteredTransactions by viewModel.filteredTransactions.collectAsStateWithLifecycle()
-    val parsedPreviews by viewModel.parsedPreviews.collectAsStateWithLifecycle()
-    val voicePreview by viewModel.voicePreview.collectAsStateWithLifecycle()
-    val selectedPeriod by viewModel.selectedPeriod.collectAsStateWithLifecycle()
-    val currencyCode by viewModel.currencyCode.collectAsStateWithLifecycle()
-    val onboardingDone by viewModel.onboardingDone.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val onboardingReady by viewModel.onboardingReady.collectAsStateWithLifecycle()
+
+    val categories = uiState.categories
+    val filteredTransactions = uiState.filteredTransactions
+    val voicePreview = uiState.voicePreview
+    val selectedPeriod = uiState.selectedPeriod
+    val currencyCode = uiState.currencyCode
 
     val currency = remember(currencyCode) { Currency.fromCode(currencyCode) }
     val financialColors = WalletAiTheme.financialColors
@@ -112,16 +116,14 @@ fun DashboardScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var editingTransaction by remember { mutableStateOf<TransactionData?>(null) }
     var editingVoicePreview by remember { mutableStateOf(false) }
-    var statementInputText by remember { mutableStateOf("") }
     var isListening by remember { mutableStateOf(false) }
     var voiceTextFallback by remember { mutableStateOf("") }
     var showVoiceFallback by remember { mutableStateOf(false) }
+    var importExpanded by remember { mutableStateOf(false) }
 
-    val focusManager = LocalFocusManager.current
     val dateFormatter = remember { SimpleDateFormat("dd.MM.yyyy", Locale("ru")) }
     var pendingVoiceStart by remember { mutableStateOf(false) }
-    var showOnboarding by remember { mutableStateOf(false) }
-    var onboardingInitialized by remember { mutableStateOf(false) }
+    val showOnboarding = onboardingReady == false
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -132,13 +134,9 @@ fun DashboardScreen(
     var voiceHelper by remember { mutableStateOf<VoiceRecognizerHelper?>(null) }
 
     DisposableEffect(context) {
-        onDispose { voiceHelper?.stopListening() }
-    }
-
-    LaunchedEffect(onboardingDone) {
-        if (!onboardingInitialized) {
-            showOnboarding = !onboardingDone
-            onboardingInitialized = true
+        onDispose {
+            voiceHelper?.destroy()
+            voiceHelper = null
         }
     }
 
@@ -150,7 +148,14 @@ fun DashboardScreen(
                 viewModel.parseVoiceInput(text)
                 showVoiceFallback = false
             },
-            onError = { showVoiceFallback = true },
+            onError = { errorCode ->
+                viewModel.showMessage(VoiceRecognizerHelper.userMessageForError(errorCode))
+                if (errorCode == android.speech.SpeechRecognizer.ERROR_CLIENT ||
+                    errorCode == android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+                ) {
+                    showVoiceFallback = true
+                }
+            },
             onListeningChanged = { listening -> isListening = listening }
         ).also { it.startListening() }
     }
@@ -182,7 +187,6 @@ fun DashboardScreen(
     if (showOnboarding) {
         AlertDialog(
             onDismissRequest = {
-                showOnboarding = false
                 viewModel.completeOnboarding(loadDemo = false)
             },
             title = { Text("Добро пожаловать в WalletAI") },
@@ -191,7 +195,6 @@ fun DashboardScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    showOnboarding = false
                     viewModel.completeOnboarding(loadDemo = true)
                     onLoadDemo()
                 }) {
@@ -200,7 +203,6 @@ fun DashboardScreen(
             },
             dismissButton = {
                 TextButton(onClick = {
-                    showOnboarding = false
                     viewModel.completeOnboarding(loadDemo = false)
                 }) {
                     Text("Чистый старт")
@@ -243,29 +245,11 @@ fun DashboardScreen(
             }
 
             item {
-                StatementImportCard(
-                    text = statementInputText,
-                    onTextChange = { statementInputText = it },
-                    onParse = {
-                        viewModel.parseBankStatement(statementInputText)
-                        statementInputText = ""
-                        focusManager.clearFocus()
-                    },
-                    onClear = { statementInputText = "" }
+                CollapsedImportCard(
+                    expanded = importExpanded,
+                    onToggle = { importExpanded = !importExpanded },
+                    onOpenImport = onNavigateToImport
                 )
-            }
-
-            if (parsedPreviews.isNotEmpty()) {
-                item {
-                    ParsedPreviewsCard(
-                        previews = parsedPreviews,
-                        categories = categories,
-                        currency = currency,
-                        onUpdateCategory = viewModel::updatePreviewCategory,
-                        onClear = viewModel::clearPreviews,
-                        onCommit = viewModel::commitPreviews
-                    )
-                }
             }
 
             voicePreview?.let { preview ->
@@ -274,8 +258,8 @@ fun DashboardScreen(
                         preview = preview,
                         categories = categories,
                         currency = currency,
-                        onUpdateCategory = { viewModel.updatePreviewCategory(preview.id, it) },
-                        onClear = { viewModel.clearPreviews() },
+                        onUpdateCategory = { viewModel.updateVoicePreviewCategory(it) },
+                        onClear = { viewModel.clearVoicePreview() },
                         onEdit = { editingVoicePreview = true },
                         onCommit = viewModel::commitVoicePreview
                     )
@@ -478,13 +462,11 @@ private fun BalanceCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatementImportCard(
-    text: String,
-    onTextChange: (String) -> Unit,
-    onParse: () -> Unit,
-    onClear: () -> Unit
+private fun CollapsedImportCard(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onOpenImport: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -495,47 +477,33 @@ private fun StatementImportCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(
-                text = "Импорт из выписки / SMS",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Вставьте строки из банковской выписки. ML-модель определит категории автоматически.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-            )
-            OutlinedTextField(
-                value = text,
-                onValueChange = onTextChange,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = {
-                    Text(
-                        "01.07 Magnum продукты 4500₸\nKaspi перевод +150000₸",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                },
-                maxLines = 4,
-                textStyle = MaterialTheme.typography.bodySmall,
-                shape = RoundedCornerShape(8.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                )
-            )
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (text.isNotBlank()) {
-                    TextButton(onClick = onClear) { Text("Сбросить") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                Button(onClick = onParse, enabled = text.isNotBlank(), shape = RoundedCornerShape(10.dp)) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                Text(
+                    text = "Импорт из выписки / SMS",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Свернуть" else "Развернуть"
+                )
+            }
+            if (expanded) {
+                Text(
+                    text = "Вставьте текст выписки, загрузите PDF или используйте ML-классификацию на отдельном экране.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                )
+                Button(onClick = onOpenImport, modifier = Modifier.align(Alignment.End)) {
+                    Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Анализировать")
+                    Text("Открыть импорт")
                 }
             }
         }
@@ -544,36 +512,100 @@ private fun StatementImportCard(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ParsedPreviewsCard(
-    previews: List<ParsedPreview>,
-    categories: List<CategoryData>,
-    currency: Currency,
-    onUpdateCategory: (Long, Long) -> Unit,
+internal fun StatementImportCard(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onParse: () -> Unit,
     onClear: () -> Unit,
-    onCommit: () -> Unit
+    expanded: Boolean = true,
+    onToggle: () -> Unit = {},
+    onImportPdf: (() -> Unit)? = null,
+    onOpenFullImport: (() -> Unit)? = null
 ) {
-    PreviewCardShell(
-        title = "Предпросмотр (${previews.size})",
-        onClose = onClear
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !expanded) { onToggle() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        previews.forEach { preview ->
-            PreviewItem(
-                preview = preview,
-                categories = categories,
-                currency = currency,
-                onUpdateCategory = { onUpdateCategory(preview.id, it) }
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            TextButton(onClick = onClear) { Text("Отмена") }
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onCommit, shape = RoundedCornerShape(10.dp)) {
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Сохранить все (${previews.size})")
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggle() },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Импорт из выписки / SMS",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Свернуть" else "Развернуть"
+                )
+            }
+
+            if (expanded) {
+                Text(
+                    text = "Вставьте строки из банковской выписки или откройте полный экран импорта с PDF.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text(
+                            "01.07 Magnum продукты 4500₸\nKaspi перевод +150000₸",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    },
+                    maxLines = 4,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (text.isNotBlank()) {
+                        TextButton(onClick = onClear) { Text("Сбросить") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    if (onImportPdf != null) {
+                        TextButton(onClick = onImportPdf) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("PDF")
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    if (onOpenFullImport != null) {
+                        TextButton(onClick = onOpenFullImport) { Text("Полный экран") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Button(onClick = onParse, enabled = text.isNotBlank(), shape = RoundedCornerShape(10.dp)) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Анализировать")
+                    }
+                }
+            } else if (onOpenFullImport != null) {
+                TextButton(onClick = onOpenFullImport, modifier = Modifier.align(Alignment.End)) {
+                    Text("Открыть импорт")
+                }
             }
         }
     }
@@ -617,7 +649,7 @@ private fun VoicePreviewCard(
 }
 
 @Composable
-private fun PreviewCardShell(
+internal fun PreviewCardShell(
     title: String,
     onClose: () -> Unit,
     content: @Composable ColumnScope.() -> Unit
@@ -650,7 +682,7 @@ private fun PreviewCardShell(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PreviewItem(
+internal fun PreviewItem(
     preview: ParsedPreview,
     categories: List<CategoryData>,
     currency: Currency,
