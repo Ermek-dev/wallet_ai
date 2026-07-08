@@ -28,6 +28,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,6 +54,8 @@ import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.ui.components.CategoryShare
 import kz.abdiyev.walletai.ui.components.DonutChart
 import kz.abdiyev.walletai.ui.components.ProgressBarChart
+import kz.abdiyev.walletai.ui.theme.WalletAiTheme
+import kz.abdiyev.walletai.ui.viewmodel.AnalyticsChartMode
 import kz.abdiyev.walletai.ui.viewmodel.AnalyticsViewModel
 import kz.abdiyev.walletai.util.MoneyFormatter
 import kz.abdiyev.walletai.util.ShareHelper
@@ -66,20 +71,37 @@ fun AnalyticsScreen(
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val filteredTransactions by viewModel.filteredTransactions.collectAsStateWithLifecycle()
     val selectedPeriod by viewModel.selectedPeriod.collectAsStateWithLifecycle()
-    val currencyCode by viewModel.currencyCode.collectAsStateWithLifecycle()
+    val chartMode by viewModel.chartMode.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
 
-    val currency = remember(currencyCode) { Currency.fromCode(currencyCode) }
+    val currency = remember(settings.currencyCode) { Currency.fromCode(settings.currencyCode) }
+    val financialColors = WalletAiTheme.financialColors
     val expenses = filteredTransactions.filter { it.type == TransactionType.EXPENSE }
+    val incomes = filteredTransactions.filter { it.type == TransactionType.INCOME }
     val totalExpenseMinor = expenses.sumOf { it.money.amountMinor }
+    val totalIncomeMinor = incomes.sumOf { it.money.amountMinor }
+    val balanceMinor = totalIncomeMinor - totalExpenseMinor
+    val savingsRate = if (totalIncomeMinor > 0) {
+        balanceMinor.toFloat() / totalIncomeMinor.toFloat() * 100f
+    } else {
+        0f
+    }
 
-    val categoryShares = remember(filteredTransactions, categories, currency) {
-        if (totalExpenseMinor == 0L) emptyList()
+    val activeType = when (chartMode) {
+        AnalyticsChartMode.EXPENSE -> TransactionType.EXPENSE
+        AnalyticsChartMode.INCOME -> TransactionType.INCOME
+    }
+    val activeTransactions = filteredTransactions.filter { it.type == activeType }
+    val totalActiveMinor = activeTransactions.sumOf { it.money.amountMinor }
+
+    val categoryShares = remember(activeTransactions, categories, currency, totalActiveMinor) {
+        if (totalActiveMinor == 0L) emptyList()
         else {
-            expenses.groupBy { it.categoryId }.map { (catId, txs) ->
+            activeTransactions.groupBy { it.categoryId }.map { (catId, txs) ->
                 val category = categories.find { it.id == catId }
-                    ?: CategoryData(id = catId, name = "Другое", type = TransactionType.EXPENSE, colorHex = "#757575", iconName = "")
+                    ?: CategoryData(id = catId, name = "Другое", type = activeType, colorHex = "#757575", iconName = "")
                 val sumMinor = txs.sumOf { it.money.amountMinor }
-                val pct = (sumMinor.toFloat() / totalExpenseMinor * 100f)
+                val pct = (sumMinor.toFloat() / totalActiveMinor * 100f)
                 CategoryShare(
                     category = category,
                     amountMinor = sumMinor,
@@ -105,6 +127,57 @@ fun AnalyticsScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Сводка за ${selectedPeriod.labelRu.lowercase()}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("Доходы", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                MoneyFormatter.format(Money(totalIncomeMinor, currency), showSign = false),
+                                fontWeight = FontWeight.Bold,
+                                color = financialColors.income
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Расходы", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                MoneyFormatter.format(Money(totalExpenseMinor, currency), showSign = false),
+                                fontWeight = FontWeight.Bold,
+                                color = financialColors.expense
+                            )
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("Сальдо", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                MoneyFormatter.formatBalance(Money(balanceMinor, currency)),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Норма сбережений", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                text = if (totalIncomeMinor > 0) "${"%.0f".format(savingsRate)}%" else "—",
+                                fontWeight = FontWeight.Bold,
+                                color = if (savingsRate >= 0) financialColors.income else financialColors.expense
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 )
@@ -124,11 +197,25 @@ fun AnalyticsScreen(
                             )
                         }
                     }
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        SegmentedButton(
+                            selected = chartMode == AnalyticsChartMode.EXPENSE,
+                            onClick = { viewModel.setChartMode(AnalyticsChartMode.EXPENSE) },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                            label = { Text("Расходы") }
+                        )
+                        SegmentedButton(
+                            selected = chartMode == AnalyticsChartMode.INCOME,
+                            onClick = { viewModel.setChartMode(AnalyticsChartMode.INCOME) },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                            label = { Text("Доходы") }
+                        )
+                    }
                 }
             }
         }
 
-        if (totalExpenseMinor == 0L) {
+        if (totalActiveMinor == 0L) {
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -141,7 +228,11 @@ fun AnalyticsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Недостаточно данных расходов для графиков.",
+                            text = if (chartMode == AnalyticsChartMode.EXPENSE) {
+                                "Недостаточно данных расходов для графиков."
+                            } else {
+                                "Недостаточно данных доходов для графиков."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
@@ -159,7 +250,11 @@ fun AnalyticsScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "Структура расходов",
+                            text = if (chartMode == AnalyticsChartMode.EXPENSE) {
+                                "Структура расходов"
+                            } else {
+                                "Структура доходов"
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.align(Alignment.Start)
@@ -167,7 +262,7 @@ fun AnalyticsScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                         DonutChart(
                             shares = categoryShares,
-                            totalText = MoneyFormatter.format(Money(totalExpenseMinor, currency)),
+                            totalText = MoneyFormatter.format(Money(totalActiveMinor, currency)),
                             modifier = Modifier.padding(10.dp)
                         )
                     }
