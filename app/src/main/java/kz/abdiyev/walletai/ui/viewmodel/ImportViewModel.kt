@@ -16,13 +16,18 @@ import kz.abdiyev.walletai.domain.repository.TransactionRepository
 import kz.abdiyev.walletai.ml.BankStatementParser
 import kz.abdiyev.walletai.ml.TransactionClassifier
 import kz.abdiyev.walletai.ml.statement.StatementFormat
+import kz.abdiyev.walletai.util.CalendarMillis
+import kz.abdiyev.walletai.util.DescriptionNormalizer
 import kz.abdiyev.walletai.util.PdfTextExtractor
+import kz.abdiyev.walletai.util.TimeUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 data class ImportSummary(
@@ -35,6 +40,14 @@ data class ImportSummary(
     val duplicateCount: Int,
     val format: StatementFormat
 )
+
+sealed interface ImportUiState {
+    data object Idle : ImportUiState
+    data class Parsing(val sourceLabel: String) : ImportUiState
+    data class Preview(val summary: ImportSummary, val sourceLabel: String) : ImportUiState
+    data object Saving : ImportUiState
+    data class Error(val message: String) : ImportUiState
+}
 
 class ImportViewModel(
     private val transactionRepository: TransactionRepository,
@@ -51,8 +64,8 @@ class ImportViewModel(
     private val _parsedPreviews = MutableStateFlow<List<ParsedPreview>>(emptyList())
     val parsedPreviews: StateFlow<List<ParsedPreview>> = _parsedPreviews.asStateFlow()
 
-    private val _importSummary = MutableStateFlow<ImportSummary?>(null)
-    val importSummary: StateFlow<ImportSummary?> = _importSummary.asStateFlow()
+    private val _uiState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
+    val uiState: StateFlow<ImportUiState> = _uiState.asStateFlow()
 
     private val _skipTransfers = MutableStateFlow(true)
     val skipTransfers: StateFlow<Boolean> = _skipTransfers.asStateFlow()
@@ -76,35 +89,47 @@ class ImportViewModel(
 
     fun parseBankStatement(text: String) {
         if (text.isBlank()) return
-        viewModelScope.launch { parseStatementText(text) }
+        viewModelScope.launch {
+            _uiState.value = ImportUiState.Parsing("Текст выписки")
+            parseStatementText(text, "Текст выписки")
+        }
     }
 
-    fun parsePdf(context: Context, uri: Uri) {
+    fun parsePdf(context: Context, uri: Uri, fileName: String? = null) {
         viewModelScope.launch {
+            val label = fileName ?: uri.lastPathSegment ?: "PDF-файл"
+            _uiState.value = ImportUiState.Parsing(label)
             try {
-                val text = PdfTextExtractor.extractText(context, uri)
-                if (text.isBlank()) {
-                    _importMessage.value = "PDF не содержит текста для разбора"
-                } else {
-                    parseStatementText(text)
+                val text = withContext(Dispatchers.IO) {
+                    PdfTextExtractor.extractText(context, uri)
+                }
+                when {
+                    text.isBlank() -> {
+                        _parsedPreviews.value = emptyList()
+                        _uiState.value = ImportUiState.Error(
+                            "PDF не содержит текстового слоя. Сканы без OCR пока не поддерживаются."
+                        )
+                    }
+                    else -> parseStatementText(text, label)
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to parse PDF")
-                _importMessage.value = "Не удалось прочитать PDF"
+                _parsedPreviews.value = emptyList()
+                _uiState.value = ImportUiState.Error("Не удалось прочитать PDF")
             }
         }
     }
 
-    private suspend fun parseStatementText(text: String) {
+    private suspend fun parseStatementText(text: String, sourceLabel: String) {
         try {
             if (trainedModel == null) refreshModel()
             val currency = Currency.fromCode(settings.value.currencyCode)
             val cats = categoryRepository.getAll()
             val parseResult = bankStatementParser.parse(text, cats, trainedModel, currency)
+
             if (parseResult.lines.isEmpty()) {
-                _importMessage.value = "Не удалось распознать операции в тексте"
                 _parsedPreviews.value = emptyList()
-                _importSummary.value = null
+                _uiState.value = ImportUiState.Error("Операций не найдено")
                 return
             }
 
@@ -130,10 +155,12 @@ class ImportViewModel(
             }
 
             _parsedPreviews.value = previews
-            _importSummary.value = buildSummary(previews, parseResult.format)
+            val summary = buildSummary(previews, parseResult.format)
+            _uiState.value = ImportUiState.Preview(summary, sourceLabel)
         } catch (e: Exception) {
             Timber.e(e, "Failed to parse bank statement")
-            _importMessage.value = "Ошибка разбора выписки"
+            _parsedPreviews.value = emptyList()
+            _uiState.value = ImportUiState.Error("Ошибка разбора выписки")
         }
     }
 
@@ -157,8 +184,45 @@ class ImportViewModel(
     }
 
     fun updatePreviewCategory(previewId: Long, categoryId: Long) {
+        val preview = _parsedPreviews.value.find { it.id == previewId } ?: return
         _parsedPreviews.value = _parsedPreviews.value.map {
             if (it.id == previewId) it.copy(predictedCategoryId = categoryId) else it
+        }
+        viewModelScope.launch {
+            merchantRuleRepository.saveRule(preview.description, categoryId)
+        }
+    }
+
+    fun updatePreviewEdited(
+        previewId: Long,
+        money: Money,
+        type: TransactionType,
+        categoryId: Long,
+        description: String,
+        date: Long
+    ) {
+        _parsedPreviews.value = _parsedPreviews.value.map {
+            if (it.id == previewId) {
+                it.copy(
+                    money = money,
+                    type = type,
+                    predictedCategoryId = categoryId,
+                    description = description,
+                    date = date
+                )
+            } else {
+                it
+            }
+        }
+        viewModelScope.launch {
+            merchantRuleRepository.saveRule(description, categoryId)
+        }
+        val current = _uiState.value
+        if (current is ImportUiState.Preview) {
+            _uiState.value = ImportUiState.Preview(
+                summary = buildSummary(_parsedPreviews.value, current.summary.format),
+                sourceLabel = current.sourceLabel
+            )
         }
     }
 
@@ -166,24 +230,28 @@ class ImportViewModel(
         val toSave = committablePreviews()
         if (toSave.isEmpty()) return
         viewModelScope.launch {
+            _uiState.value = ImportUiState.Saving
             try {
-                transactionRepository.insertAll(toSave.map {
-                    TransactionData(
-                        money = it.money,
-                        type = it.type,
-                        categoryId = it.predictedCategoryId,
-                        description = it.description,
-                        date = it.date,
-                        isAutoCategorized = true
-                    )
-                })
+                withContext(Dispatchers.IO) {
+                    transactionRepository.insertAll(toSave.map {
+                        val offset = TimeUtils.localOffsetMillis(it.date)
+                        TransactionData(
+                            money = it.money,
+                            type = it.type,
+                            categoryId = it.predictedCategoryId,
+                            description = it.description,
+                            date = CalendarMillis.toLocalStartOfDay(it.date, offset),
+                            isAutoCategorized = true
+                        )
+                    })
+                }
                 _parsedPreviews.value = emptyList()
-                _importSummary.value = null
                 refreshModel()
+                _uiState.value = ImportUiState.Idle
                 _importMessage.value = "Сохранено ${toSave.size} операций"
             } catch (e: Exception) {
                 Timber.e(e, "Failed to commit previews")
-                _importMessage.value = "Не удалось сохранить операции"
+                _uiState.value = ImportUiState.Error("Не удалось сохранить операции")
             }
         }
     }
@@ -197,13 +265,19 @@ class ImportViewModel(
 
     fun clearPreviews() {
         _parsedPreviews.value = emptyList()
-        _importSummary.value = null
+        _uiState.value = ImportUiState.Idle
     }
 
     fun clearImportMessage() {
         _importMessage.value = null
     }
 
+    fun dismissError() {
+        if (_uiState.value is ImportUiState.Error) {
+            _uiState.value = ImportUiState.Idle
+        }
+    }
+
     private fun dedupKey(date: Long, amountMinor: Long, description: String): Triple<Long, Long, String> =
-        Triple(date, amountMinor, description.trim())
+        Triple(date, amountMinor, DescriptionNormalizer.normalize(description))
 }
