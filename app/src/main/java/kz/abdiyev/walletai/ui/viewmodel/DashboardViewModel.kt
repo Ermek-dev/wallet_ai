@@ -6,6 +6,7 @@ import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.Period
+import kz.abdiyev.walletai.domain.model.PeriodRange
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
@@ -16,6 +17,7 @@ import kz.abdiyev.walletai.ml.TransactionClassifier
 import kz.abdiyev.walletai.ml.VoiceInputParser
 import kz.abdiyev.walletai.util.Clock
 import kz.abdiyev.walletai.util.PeriodFilter
+import kz.abdiyev.walletai.util.TimeUtils
 import kz.abdiyev.walletai.util.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -48,7 +50,9 @@ data class DashboardUiState(
     val categories: List<CategoryData> = emptyList(),
     val currencyCode: String = Currency.KZT.code,
     val selectedPeriod: Period = Period.MONTH,
+    val customRange: PeriodRange? = null,
     val filteredTransactions: List<TransactionData> = emptyList(),
+    val hiddenByPeriodCount: Int = 0,
     val voicePreview: ParsedPreview? = null
 )
 
@@ -56,6 +60,7 @@ sealed interface DashboardEvent {
     data class Deleted(val transaction: TransactionData) : DashboardEvent
     data object SaveError : DashboardEvent
     data class Info(val text: String) : DashboardEvent
+    data object VoiceAmountMissing : DashboardEvent
 }
 
 class DashboardViewModel(
@@ -69,24 +74,38 @@ class DashboardViewModel(
 ) : ViewModel() {
 
     private val _selectedPeriod = MutableStateFlow(Period.MONTH)
+    private val _customRange = MutableStateFlow<PeriodRange?>(null)
     private val _voicePreview = MutableStateFlow<ParsedPreview?>(null)
 
     val uiState: StateFlow<DashboardUiState> = combine(
-        transactionRepository.transactions,
-        categoryRepository.categories,
-        settingsRepository.settings,
-        _selectedPeriod,
-        _voicePreview
-    ) { txs, cats, settings, period, voice ->
+        combine(
+            transactionRepository.transactions,
+            categoryRepository.categories,
+            settingsRepository.settings,
+            ::Triple
+        ),
+        combine(_selectedPeriod, _customRange, _voicePreview, ::Triple)
+    ) { (txs, cats, settings), (period, customRange, voice) ->
+        val now = clock.nowMillis()
+        val offset = TimeUtils.localOffsetMillis(now)
+        val filtered = PeriodFilter.filter(
+                txs,
+                period,
+                now,
+                offset,
+                customRange
+            )
         DashboardUiState(
             transactions = txs,
             categories = cats,
             currencyCode = settings.currencyCode,
             selectedPeriod = period,
-            filteredTransactions = PeriodFilter.filter(txs, period, clock.nowMillis()),
+            customRange = customRange,
+            filteredTransactions = filtered,
+            hiddenByPeriodCount = PeriodFilter.outsideCount(txs, period, now, offset, customRange),
             voicePreview = voice
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
+    }.stateIn(viewModelScope, SharingStarted.Lazily, DashboardUiState())
 
     private val _onboardingReady = MutableStateFlow<Boolean?>(null)
     val onboardingReady: StateFlow<Boolean?> = _onboardingReady.asStateFlow()
@@ -137,6 +156,14 @@ class DashboardViewModel(
 
     fun setPeriod(period: Period) {
         _selectedPeriod.value = period
+        if (period != Period.CUSTOM) {
+            _customRange.value = null
+        }
+    }
+
+    fun applyCustomRange(range: PeriodRange) {
+        _customRange.value = range
+        _selectedPeriod.value = Period.CUSTOM
     }
 
     fun addTransaction(money: Money, type: TransactionType, categoryId: Long, description: String, date: Long) {
@@ -197,18 +224,30 @@ class DashboardViewModel(
         viewModelScope.launch {
             ensureModelTrained()
             val currency = Currency.fromCode(uiState.value.currencyCode)
-            val result = voiceInputParser.parse(text, currency)
+            val result = voiceInputParser.parse(text, currency, clock.nowMillis())
             val cats = categoryRepository.getAll()
             val ruleCat = merchantRuleRepository.findCategoryId(result.description)
             val catId = ruleCat ?: result.money?.let {
                 trainedModel?.let { model -> classifier.classify(result.description, model, cats) }
             } ?: cats.firstOrNull()?.id ?: 0L
+            val parsedMoney = result.money
+            if (parsedMoney == null || parsedMoney.amountMinor <= 0) {
+                _events.trySend(DashboardEvent.VoiceAmountMissing)
+                _voicePreview.value = ParsedPreview(
+                    money = Money.fromMajor(0.0, currency),
+                    type = result.type,
+                    description = result.description.ifBlank { text.trim() },
+                    predictedCategoryId = catId,
+                    date = result.dateMillis ?: clock.nowMillis()
+                )
+                return@launch
+            }
             _voicePreview.value = ParsedPreview(
-                money = result.money ?: Money.fromMajor(0.0, currency),
+                money = parsedMoney,
                 type = result.type,
                 description = result.description,
                 predictedCategoryId = catId,
-                date = clock.nowMillis()
+                date = result.dateMillis ?: clock.nowMillis()
             )
         }
     }

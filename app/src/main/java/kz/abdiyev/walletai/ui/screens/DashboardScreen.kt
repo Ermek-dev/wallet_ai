@@ -23,18 +23,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -75,22 +72,36 @@ import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.Period
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.ui.components.BalanceSummaryRow
+import kz.abdiyev.walletai.ui.components.DayGroupCard
+import kz.abdiyev.walletai.ui.components.HiddenByPeriodHint
+import kz.abdiyev.walletai.ui.components.MonthHeader
+import kz.abdiyev.walletai.ui.components.PeriodRangePickerDialog
+import kz.abdiyev.walletai.ui.components.SegmentedPeriodSelector
+import kz.abdiyev.walletai.ui.components.TransactionRow
+import kz.abdiyev.walletai.ui.components.WalletSurfaceCard
 import kz.abdiyev.walletai.ui.components.getCategoryIcon
+import kz.abdiyev.walletai.ui.theme.FabDark
+import kz.abdiyev.walletai.ui.theme.FabShape
+import kz.abdiyev.walletai.ui.theme.CardShape
+import kz.abdiyev.walletai.ui.theme.SmallShape
 import kz.abdiyev.walletai.ui.theme.WalletAiTheme
+import kz.abdiyev.walletai.util.groupTransactionsByDay
 import kz.abdiyev.walletai.ui.viewmodel.DashboardViewModel
 import kz.abdiyev.walletai.ui.viewmodel.ParsedPreview
 import kz.abdiyev.walletai.ui.voice.VoiceRecognizerHelper
 import kz.abdiyev.walletai.util.MoneyFormatter
+import kz.abdiyev.walletai.util.PeriodLabels
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
+    userName: String = "",
     onLoadDemo: () -> Unit = {},
-    onNavigateToImport: () -> Unit = {},
+    onNavigateToHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -99,13 +110,20 @@ fun DashboardScreen(
 
     val categories = uiState.categories
     val filteredTransactions = uiState.filteredTransactions
+    val hiddenByPeriodCount = uiState.hiddenByPeriodCount
     val voicePreview = uiState.voicePreview
     val selectedPeriod = uiState.selectedPeriod
+    val customRange = uiState.customRange
     val currencyCode = uiState.currencyCode
 
     val currency = remember(currencyCode) { Currency.fromCode(currencyCode) }
     val financialColors = WalletAiTheme.financialColors
-    val recentTransactions = remember(filteredTransactions) { filteredTransactions.take(5) }
+    val dayGroups = remember(filteredTransactions) { groupTransactionsByDay(filteredTransactions) }
+    val periodTitle = remember(selectedPeriod, customRange) { PeriodLabels.title(selectedPeriod, customRange = customRange) }
+    val periodRange = remember(selectedPeriod, customRange) { PeriodLabels.rangeLabel(selectedPeriod, customRange = customRange) }
+    val initials = remember(userName) { userName.trim().take(2).ifBlank { "?" } }
+
+    var showPeriodPicker by remember { mutableStateOf(false) }
 
     val expenses = filteredTransactions.filter { it.type == TransactionType.EXPENSE }
         .fold(Money(0, currency)) { acc, tx -> acc + tx.money }
@@ -119,7 +137,6 @@ fun DashboardScreen(
     var isListening by remember { mutableStateOf(false) }
     var voiceTextFallback by remember { mutableStateOf("") }
     var showVoiceFallback by remember { mutableStateOf(false) }
-    var importExpanded by remember { mutableStateOf(false) }
 
     val dateFormatter = remember { SimpleDateFormat("dd.MM.yyyy", Locale("ru")) }
     var pendingVoiceStart by remember { mutableStateOf(false) }
@@ -150,11 +167,7 @@ fun DashboardScreen(
             },
             onError = { errorCode ->
                 viewModel.showMessage(VoiceRecognizerHelper.userMessageForError(errorCode))
-                if (errorCode == android.speech.SpeechRecognizer.ERROR_CLIENT ||
-                    errorCode == android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
-                ) {
-                    showVoiceFallback = true
-                }
+                showVoiceFallback = true
             },
             onListeningChanged = { listening -> isListening = listening }
         ).also { it.startListening() }
@@ -217,39 +230,71 @@ fun DashboardScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp)
+            contentPadding = PaddingValues(bottom = 100.dp, top = 16.dp)
         ) {
             item {
-                BalanceCard(
-                    balance = totalBalance,
-                    incomes = incomes,
-                    expenses = expenses,
-                    incomeColor = financialColors.income,
-                    expenseColor = financialColors.expense
-                )
+                MonthHeader(monthLabel = periodTitle, initials = initials)
             }
 
             item {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Period.entries.forEach { period ->
-                        FilterChip(
-                            selected = selectedPeriod == period,
-                            onClick = { viewModel.setPeriod(period) },
-                            label = { Text(period.labelRu) }
-                        )
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Баланс",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = MoneyFormatter.formatBalance(totalBalance),
+                        style = MaterialTheme.typography.displayMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (totalBalance.amountMinor >= 0) financialColors.income else financialColors.expense
+                    )
+                    BalanceSummaryRow(
+                        incomesText = MoneyFormatter.format(incomes, showSign = false),
+                        expensesText = MoneyFormatter.format(expenses, showSign = false),
+                        incomeColor = financialColors.income,
+                        expenseColor = financialColors.expense
+                    )
                 }
             }
 
             item {
-                CollapsedImportCard(
-                    expanded = importExpanded,
-                    onToggle = { importExpanded = !importExpanded },
-                    onOpenImport = onNavigateToImport
+                SegmentedPeriodSelector(
+                    selected = selectedPeriod,
+                    hasCustomRange = customRange != null,
+                    onSelectPreset = viewModel::setPeriod,
+                    onCustomClick = { showPeriodPicker = true }
                 )
+            }
+
+            if (selectedPeriod != Period.ALL) {
+                item {
+                    Text(
+                        text = periodRange,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (isListening) {
+                item {
+                    WalletSurfaceCard {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Слушаю…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "Пример: «потратил 1500 на обед»",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Системное распознавание речи может отправлять аудио в облако Google. Всегда можно ввести операцию вручную.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
 
             voicePreview?.let { preview ->
@@ -278,20 +323,45 @@ fun DashboardScreen(
                                 showVoiceFallback = false
                             }
                         },
+                        onRetry = {
+                            showVoiceFallback = false
+                            startVoiceInput()
+                        },
                         onDismiss = { showVoiceFallback = false }
                     )
                 }
             }
 
             item {
-                Text(
-                    text = "Последние операции",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Операции",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Все",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable(onClick = onNavigateToHistory)
+                    )
+                }
             }
 
-            if (recentTransactions.isEmpty()) {
+            if (hiddenByPeriodCount > 0) {
+                item {
+                    HiddenByPeriodHint(
+                        hiddenCount = hiddenByPeriodCount,
+                        onShowAll = { viewModel.setPeriod(Period.ALL) }
+                    )
+                }
+            }
+
+            if (filteredTransactions.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -307,21 +377,21 @@ fun DashboardScreen(
                     }
                 }
             } else {
-                items(recentTransactions, key = { it.id }) { tx ->
-                    val category = categories.find { it.id == tx.categoryId }
-                    TransactionListItem(
-                        transaction = tx,
-                        category = category,
-                        dateFormatter = dateFormatter,
+                item {
+                    DayGroupCard(
+                        dayGroups = dayGroups,
+                        categories = categories,
                         incomeColor = financialColors.income,
                         expenseColor = financialColors.expense,
-                        onClick = { editingTransaction = tx },
-                        onDelete = { viewModel.deleteTransaction(tx) }
+                        onTransactionClick = { editingTransaction = it },
+                        onTransactionDelete = viewModel::deleteTransaction,
+                        parseColorHex = ::parseColorHex
                     )
                 }
             }
         }
 
+        val isDark = isSystemInDarkTheme()
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -344,10 +414,22 @@ fun DashboardScreen(
                     contentDescription = if (isListening) "Остановить запись" else "Голосовой ввод"
                 )
             }
-            FloatingActionButton(onClick = { showAddDialog = true }) {
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                shape = FabShape,
+                containerColor = if (isDark) MaterialTheme.colorScheme.primary else FabDark,
+                contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+            ) {
                 Icon(Icons.Default.Add, contentDescription = "Добавить операцию")
             }
         }
+    }
+
+    if (showPeriodPicker) {
+        PeriodRangePickerDialog(
+            onDismiss = { showPeriodPicker = false },
+            onConfirm = viewModel::applyCustomRange
+        )
     }
 
     if (showAddDialog) {
@@ -462,155 +544,6 @@ private fun BalanceCard(
     }
 }
 
-@Composable
-private fun CollapsedImportCard(
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    onOpenImport: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onToggle),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Импорт из выписки / SMS",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Icon(
-                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (expanded) "Свернуть" else "Развернуть"
-                )
-            }
-            if (expanded) {
-                Text(
-                    text = "Вставьте текст выписки, загрузите PDF или используйте ML-классификацию на отдельном экране.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                )
-                Button(onClick = onOpenImport, modifier = Modifier.align(Alignment.End)) {
-                    Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Открыть импорт")
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun StatementImportCard(
-    text: String,
-    onTextChange: (String) -> Unit,
-    onParse: () -> Unit,
-    onClear: () -> Unit,
-    expanded: Boolean = true,
-    onToggle: () -> Unit = {},
-    onImportPdf: (() -> Unit)? = null,
-    onOpenFullImport: (() -> Unit)? = null
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = !expanded) { onToggle() },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onToggle() },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Импорт из выписки / SMS",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Icon(
-                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (expanded) "Свернуть" else "Развернуть"
-                )
-            }
-
-            if (expanded) {
-                Text(
-                    text = "Вставьте строки из банковской выписки или откройте полный экран импорта с PDF.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                )
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = {
-                        Text(
-                            "01.07 Magnum продукты 4500₸\nKaspi перевод +150000₸",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    },
-                    maxLines = 4,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                    )
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (text.isNotBlank()) {
-                        TextButton(onClick = onClear) { Text("Сбросить") }
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    if (onImportPdf != null) {
-                        TextButton(onClick = onImportPdf) {
-                            Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("PDF")
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    if (onOpenFullImport != null) {
-                        TextButton(onClick = onOpenFullImport) { Text("Полный экран") }
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    Button(onClick = onParse, enabled = text.isNotBlank(), shape = RoundedCornerShape(10.dp)) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Анализировать")
-                    }
-                }
-            } else if (onOpenFullImport != null) {
-                TextButton(onClick = onOpenFullImport, modifier = Modifier.align(Alignment.End)) {
-                    Text("Открыть импорт")
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun VoicePreviewCard(
@@ -639,11 +572,23 @@ private fun VoicePreviewCard(
                 Text("Изменить")
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onCommit, shape = RoundedCornerShape(10.dp)) {
+            val canCommit = preview.money.amountMinor > 0
+            Button(
+                onClick = onCommit,
+                enabled = canCommit,
+                shape = RoundedCornerShape(10.dp)
+            ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Сохранить")
             }
+        }
+        if (preview.money.amountMinor <= 0) {
+            Text(
+                text = "Не удалось определить сумму — отредактируйте операцию вручную.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
         }
     }
 }
@@ -654,29 +599,19 @@ internal fun PreviewCardShell(
     onClose: () -> Unit,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    WalletSurfaceCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = MaterialTheme.colorScheme.error)
-                }
+            Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            content()
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        content()
     }
 }
 
@@ -745,6 +680,7 @@ private fun VoiceFallbackCard(
     text: String,
     onTextChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
     Card(
@@ -753,7 +689,12 @@ private fun VoiceFallbackCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Голос недоступен — введите фразу вручную", fontWeight = FontWeight.Bold)
+            Text("Не удалось распознать голос", fontWeight = FontWeight.Bold)
+            Text(
+                text = "Повторите команду или введите фразу вручную. Распознавание может использовать облачный сервис Google.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             OutlinedTextField(
                 value = text,
                 onValueChange = onTextChange,
@@ -762,6 +703,7 @@ private fun VoiceFallbackCard(
             )
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                 TextButton(onClick = onDismiss) { Text("Отмена") }
+                TextButton(onClick = onRetry) { Text("Повторить") }
                 Button(onClick = onSubmit, enabled = text.isNotBlank()) { Text("Разобрать") }
             }
         }
@@ -773,90 +715,21 @@ fun TransactionListItem(
     transaction: TransactionData,
     category: CategoryData?,
     dateFormatter: SimpleDateFormat,
-    incomeColor: Color = Color(0xFF2E7D32),
-    expenseColor: Color = Color(0xFFC62828),
+    incomeColor: Color = Color(0xFF2E9C6E),
+    expenseColor: Color = Color(0xFFDA5C5C),
     onClick: () -> Unit = {},
-    onDelete: () -> Unit
+    onDelete: () -> Unit = {},
+    showDeleteButton: Boolean = true
 ) {
     val categoryColor = category?.let { parseColorHex(it.colorHex) } ?: Color.Gray
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(categoryColor.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        getCategoryIcon(category?.iconName ?: ""),
-                        contentDescription = null,
-                        tint = categoryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            transaction.description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (transaction.isAutoCategorized) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                Icons.Default.AutoAwesome,
-                                contentDescription = "Auto",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = "${category?.name ?: "Другое"} • ${dateFormatter.format(Date(transaction.date))}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = MoneyFormatter.format(transaction.money, showSign = true, type = transaction.type),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (transaction.type == TransactionType.INCOME) incomeColor else expenseColor
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "Удалить",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-    }
+    TransactionRow(
+        transaction = transaction,
+        category = category,
+        categoryColor = categoryColor,
+        incomeColor = incomeColor,
+        expenseColor = expenseColor,
+        onClick = onClick,
+        onDelete = onDelete,
+        showDeleteButton = showDeleteButton
+    )
 }
