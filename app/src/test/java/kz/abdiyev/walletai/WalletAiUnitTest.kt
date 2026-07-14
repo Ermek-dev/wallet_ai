@@ -8,6 +8,7 @@ import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.ml.BankStatementParser
 import kz.abdiyev.walletai.util.MoneyFormatter
 import kz.abdiyev.walletai.util.PeriodFilter
+import kz.abdiyev.walletai.util.StatementDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,12 +23,13 @@ class WalletAiUnitTest {
 
     @Test
     fun periodFilter_week_returnsRecentOnly() {
-        val now = 1_000_000L
+        val now = StatementDate.toEpochMillis(2026, 7, 15) + 12 * 3_600_000L
+        val weekStart = PeriodFilter.periodStartMillis(Period.WEEK, now, 0L)
         val txs = listOf(
-            tx(now - 2 * DAY, "recent"),
-            tx(now - 10 * DAY, "old")
+            tx(weekStart + 1_000L, "recent"),
+            tx(weekStart - 1_000L, "old")
         )
-        val filtered = PeriodFilter.filter(txs, Period.WEEK, now)
+        val filtered = PeriodFilter.filter(txs, Period.WEEK, now, 0L)
         assertEquals(1, filtered.size)
         assertEquals("recent", filtered.first().description)
     }
@@ -51,6 +53,5 @@ class WalletAiUnitTest {
     )
 
     companion object {
-        private const val DAY = 24L * 60 * 60 * 1000
     }
 }

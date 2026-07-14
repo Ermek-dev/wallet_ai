@@ -12,25 +12,24 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -84,7 +83,6 @@ fun MainAppScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
 
     val showBottomBar = currentRoute in WalletAiRoutes.mainTabs
-    val showMainTopBar = currentRoute in WalletAiRoutes.mainTabs
 
     LaunchedEffect(Unit) {
         dashboardViewModel.events.collect { event ->
@@ -99,6 +97,10 @@ fun MainAppScreen() {
                     }
                 }
                 DashboardEvent.SaveError -> snackbarHostState.showSnackbar("Не удалось сохранить операцию")
+                DashboardEvent.VoiceAmountMissing -> snackbarHostState.showSnackbar(
+                    message = "Не удалось определить сумму — отредактируйте операцию вручную",
+                    actionLabel = "Редактировать"
+                )
                 is DashboardEvent.Info -> snackbarHostState.showSnackbar(event.text)
             }
         }
@@ -114,34 +116,21 @@ fun MainAppScreen() {
     WalletAiTheme(themeMode = settings.themeMode) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.background,
             snackbarHost = { SnackbarHost(snackbarHostState) },
-            topBar = {
-                if (showMainTopBar) {
-                    CenterAlignedTopAppBar(
-                        title = {
-                            Text(
-                                text = when (currentRoute) {
-                                    WalletAiRoutes.DASHBOARD -> "WalletAI — Учёт"
-                                    WalletAiRoutes.ANALYTICS -> "WalletAI — Аналитика"
-                                    WalletAiRoutes.ADVISOR -> "WalletAI — Советник"
-                                    else -> "WalletAI — Профиль"
-                                },
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleLarge
-                            )
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.background
-                        )
-                    )
-                }
-            },
             bottomBar = {
                 if (showBottomBar) {
                     NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        tonalElevation = 8.dp
+                        containerColor = MaterialTheme.colorScheme.background,
+                        tonalElevation = 0.dp
                     ) {
+                        val itemColors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = Color.Transparent,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         NavigationBarItem(
                             selected = currentRoute == WalletAiRoutes.DASHBOARD,
                             onClick = {
@@ -154,7 +143,8 @@ fun MainAppScreen() {
                             icon = {
                                 Icon(Icons.Default.Dashboard, contentDescription = "Учёт", modifier = Modifier.size(22.dp))
                             },
-                            label = { Text("Учёт", fontWeight = FontWeight.Bold) }
+                            label = { Text("Учёт") },
+                            colors = itemColors
                         )
                         NavigationBarItem(
                             selected = currentRoute == WalletAiRoutes.ANALYTICS,
@@ -168,7 +158,8 @@ fun MainAppScreen() {
                             icon = {
                                 Icon(Icons.Default.Analytics, contentDescription = "Аналитика", modifier = Modifier.size(22.dp))
                             },
-                            label = { Text("Аналитика", fontWeight = FontWeight.Bold) }
+                            label = { Text("Аналитика") },
+                            colors = itemColors
                         )
                         NavigationBarItem(
                             selected = currentRoute == WalletAiRoutes.ADVISOR,
@@ -182,7 +173,8 @@ fun MainAppScreen() {
                             icon = {
                                 Icon(Icons.Default.AutoAwesome, contentDescription = "Советник", modifier = Modifier.size(22.dp))
                             },
-                            label = { Text("ИИ", fontWeight = FontWeight.Bold) }
+                            label = { Text("ИИ") },
+                            colors = itemColors
                         )
                         NavigationBarItem(
                             selected = currentRoute == WalletAiRoutes.PROFILE,
@@ -196,7 +188,8 @@ fun MainAppScreen() {
                             icon = {
                                 Icon(Icons.Default.Person, contentDescription = "Профиль", modifier = Modifier.size(22.dp))
                             },
-                            label = { Text("Профиль", fontWeight = FontWeight.Bold) }
+                            label = { Text("Профиль") },
+                            colors = itemColors
                         )
                     }
                 }
@@ -216,8 +209,9 @@ fun MainAppScreen() {
                     composable(WalletAiRoutes.DASHBOARD) {
                         DashboardScreen(
                             viewModel = dashboardViewModel,
+                            userName = settings.userName,
                             onLoadDemo = profileViewModel::resetToDemoData,
-                            onNavigateToImport = { navController.navigate(WalletAiRoutes.IMPORT) },
+                            onNavigateToHistory = { navController.navigate(WalletAiRoutes.HISTORY) },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -231,6 +225,7 @@ fun MainAppScreen() {
                         ProfileScreen(
                             viewModel = profileViewModel,
                             onNavigateToHistory = { navController.navigate(WalletAiRoutes.HISTORY) },
+                            onNavigateToImport = { navController.navigate(WalletAiRoutes.IMPORT) },
                             modifier = Modifier.fillMaxSize()
                         )
                     }

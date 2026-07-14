@@ -104,7 +104,8 @@ class FakeAdviceRepository(
     override suspend fun generateAdvice(
         transactions: List<TransactionData>,
         categories: List<CategoryData>,
-        currencyCode: String
+        currencyCode: String,
+        forceRefresh: Boolean
     ): kz.abdiyev.walletai.ai.AdviceResult = generateResult
 
     override fun localAdvice(

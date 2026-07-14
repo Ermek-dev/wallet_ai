@@ -2,11 +2,12 @@ package kz.abdiyev.walletai.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
@@ -17,7 +18,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -26,6 +29,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kz.abdiyev.walletai.domain.model.Currency
+import kz.abdiyev.walletai.ui.components.DayGroupCard
+import kz.abdiyev.walletai.ui.theme.SmallShape
 import kz.abdiyev.walletai.ui.theme.WalletAiTheme
 import kz.abdiyev.walletai.ui.viewmodel.HistoryViewModel
 import kz.abdiyev.walletai.util.groupTransactionsByDay
@@ -44,21 +49,26 @@ fun HistoryScreen(
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
 
-    val currency = remember(settings.currencyCode) { Currency.fromCode(settings.currencyCode) }
     val financialColors = WalletAiTheme.financialColors
     val groupedHistory = remember(searchResults) { groupTransactionsByDay(searchResults) }
     val dateFormatter = remember { SimpleDateFormat("dd.MM.yyyy", Locale("ru")) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0.dp),
         topBar = {
             TopAppBar(
-                title = { Text("История операций") },
+                title = { Text("История операций", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
-                }
+                },
+                windowInsets = WindowInsets(0.dp),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         }
     ) { innerPadding ->
@@ -67,7 +77,7 @@ fun HistoryScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 24.dp, top = 8.dp)
         ) {
             item {
@@ -77,7 +87,12 @@ fun HistoryScreen(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Поиск по описанию") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    singleLine = true
+                    singleLine = true,
+                    shape = SmallShape,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    )
                 )
             }
 
@@ -85,32 +100,22 @@ fun HistoryScreen(
                 item {
                     Text(
                         text = "Нет операций",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp)
                     )
                 }
             } else {
-                groupedHistory.forEach { (dayLabel, txs) ->
-                    item(key = "header-$dayLabel") {
-                        Text(
-                            text = dayLabel,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
-                    items(txs, key = { "history-${it.id}" }) { tx ->
-                        val category = categories.find { it.id == tx.categoryId }
-                        TransactionListItem(
-                            transaction = tx,
-                            category = category,
-                            dateFormatter = dateFormatter,
-                            incomeColor = financialColors.income,
-                            expenseColor = financialColors.expense,
-                            onClick = {},
-                            onDelete = {}
-                        )
-                    }
+                item {
+                    DayGroupCard(
+                        dayGroups = groupedHistory,
+                        categories = categories,
+                        incomeColor = financialColors.income,
+                        expenseColor = financialColors.expense,
+                        onTransactionClick = {},
+                        onTransactionDelete = {},
+                        parseColorHex = ::parseColorHex,
+                        showDeleteButton = false
+                    )
                 }
             }
         }
