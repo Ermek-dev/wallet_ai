@@ -24,6 +24,7 @@ class SettingsDataStore(private val context: Context) {
         val DEMO_LOADED = booleanPreferencesKey("demo_loaded")
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val NOTIFICATION_HOUR = intPreferencesKey("notification_hour")
+        val NOTIFICATION_MINUTE = intPreferencesKey("notification_minute")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
     }
 
@@ -36,6 +37,7 @@ class SettingsDataStore(private val context: Context) {
             demoLoaded = prefs[Keys.DEMO_LOADED] ?: false,
             notificationsEnabled = prefs[Keys.NOTIFICATIONS_ENABLED] ?: false,
             notificationHour = prefs[Keys.NOTIFICATION_HOUR] ?: 21,
+            notificationMinute = prefs[Keys.NOTIFICATION_MINUTE] ?: 0,
             biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false
         )
     }
@@ -50,6 +52,7 @@ class SettingsDataStore(private val context: Context) {
                 demoLoaded = prefs[Keys.DEMO_LOADED] ?: false,
                 notificationsEnabled = prefs[Keys.NOTIFICATIONS_ENABLED] ?: false,
                 notificationHour = prefs[Keys.NOTIFICATION_HOUR] ?: 21,
+                notificationMinute = prefs[Keys.NOTIFICATION_MINUTE] ?: 0,
                 biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false
             )
             val updated = transform(current)
@@ -60,6 +63,7 @@ class SettingsDataStore(private val context: Context) {
             prefs[Keys.DEMO_LOADED] = updated.demoLoaded
             prefs[Keys.NOTIFICATIONS_ENABLED] = updated.notificationsEnabled
             prefs[Keys.NOTIFICATION_HOUR] = updated.notificationHour
+            prefs[Keys.NOTIFICATION_MINUTE] = updated.notificationMinute
             prefs[Keys.BIOMETRIC_ENABLED] = updated.biometricEnabled
         }
     }

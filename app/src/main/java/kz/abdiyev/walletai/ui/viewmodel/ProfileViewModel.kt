@@ -68,17 +68,25 @@ class ProfileViewModel(
 
     fun setNotificationsEnabled(enabled: Boolean, scheduler: ReminderScheduler) {
         viewModelScope.launch {
-            settingsRepository.update { it.copy(notificationsEnabled = enabled) }
-            if (enabled) scheduler.scheduleDailyReminder(settings.value.notificationHour)
-            else scheduler.cancel()
+            settingsRepository.update { current ->
+                if (enabled) {
+                    scheduler.scheduleDailyReminder(current.notificationHour, current.notificationMinute)
+                } else {
+                    scheduler.cancel()
+                }
+                current.copy(notificationsEnabled = enabled)
+            }
         }
     }
 
-    fun setNotificationHour(hour: Int, scheduler: ReminderScheduler) {
+    fun setNotificationTime(hour: Int, minute: Int, scheduler: ReminderScheduler) {
         viewModelScope.launch {
-            settingsRepository.update { it.copy(notificationHour = hour) }
-            if (settings.value.notificationsEnabled) {
-                scheduler.scheduleDailyReminder(hour)
+            settingsRepository.update { current ->
+                val updated = current.copy(notificationHour = hour, notificationMinute = minute)
+                if (updated.notificationsEnabled) {
+                    scheduler.scheduleDailyReminder(hour, minute)
+                }
+                updated
             }
         }
     }

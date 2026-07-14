@@ -10,7 +10,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -26,19 +25,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Restore
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -46,12 +43,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,9 +66,16 @@ import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.ThemeMode
 import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.notification.ReminderScheduler
+import kz.abdiyev.walletai.ui.components.CategoryBadge
+import kz.abdiyev.walletai.ui.components.PrimaryCta
+import kz.abdiyev.walletai.ui.components.ScreenTitle
+import kz.abdiyev.walletai.ui.components.SegmentedToggle
+import kz.abdiyev.walletai.ui.components.SettingsRow
+import kz.abdiyev.walletai.ui.components.WalletSurfaceCard
 import kz.abdiyev.walletai.ui.components.categoryColorOptions
 import kz.abdiyev.walletai.ui.components.categoryIconOptions
 import kz.abdiyev.walletai.ui.components.getCategoryIcon
+import kz.abdiyev.walletai.ui.theme.SmallShape
 import kz.abdiyev.walletai.ui.viewmodel.ProfileViewModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -80,6 +83,7 @@ import kz.abdiyev.walletai.ui.viewmodel.ProfileViewModel
 fun ProfileScreen(
     viewModel: ProfileViewModel,
     onNavigateToHistory: () -> Unit = {},
+    onNavigateToImport: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -92,14 +96,20 @@ fun ProfileScreen(
     val userName = settings.userName
     val themeMode = settings.themeMode
     val notificationsEnabled = settings.notificationsEnabled
+    val notificationHour = settings.notificationHour
+    val notificationMinute = settings.notificationMinute
+    val currency = remember(currencyCode) { Currency.fromCode(currencyCode) }
 
     var localUserName by remember(userName) { mutableStateOf(userName) }
-    // Show the editor right away while the name is empty; otherwise start in view mode
-    var isEditingName by remember(userName) { mutableStateOf(userName.isBlank()) }
+    var isEditingProfile by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<CategoryData?>(null) }
     var showAddCategory by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    val notificationTimeLabel = remember(notificationHour, notificationMinute) {
+        "%02d:%02d".format(notificationHour, notificationMinute)
+    }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -107,74 +117,84 @@ fun ProfileScreen(
         if (granted) viewModel.setNotificationsEnabled(true, scheduler)
     }
 
+    val initials = remember(userName) { userName.trim().take(2).ifBlank { "?" }.uppercase() }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
         state = rememberLazyListState(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(bottom = 24.dp, top = 8.dp)
+        contentPadding = PaddingValues(bottom = 24.dp, top = 16.dp)
     ) {
+        item { ScreenTitle("Профиль") }
+
         item {
-            SectionCard(title = "Профиль") {
-                if (isEditingName) {
+            WalletSurfaceCard(
+                modifier = Modifier.clickable { isEditingProfile = !isEditingProfile }
+            ) {
+                if (isEditingProfile) {
                     OutlinedTextField(
                         value = localUserName,
                         onValueChange = { localUserName = it },
                         label = { Text("Ваше имя") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        shape = SmallShape
                     )
-                    Row(
-                        modifier = Modifier.align(Alignment.End),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (userName.isNotBlank()) {
-                            TextButton(onClick = {
-                                localUserName = userName
-                                isEditingName = false
-                            }) {
-                                Text("Отмена")
-                            }
-                        }
-                        Button(
-                            onClick = {
-                                viewModel.setUserName(localUserName.trim())
-                                isEditingName = false
-                            },
-                            enabled = localUserName.isNotBlank(),
-                            modifier = Modifier.height(48.dp)
-                        ) {
-                            Text("Сохранить")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Currency.entries.forEach { c ->
+                            FilterChip(
+                                selected = currencyCode == c.code,
+                                onClick = { viewModel.setCurrency(c.code) },
+                                label = { Text("${c.symbol} ${c.code}") }
+                            )
                         }
                     }
+                    PrimaryCta(
+                        text = "Сохранить",
+                        onClick = {
+                            viewModel.setUserName(localUserName.trim())
+                            isEditingProfile = false
+                        },
+                        enabled = localUserName.isNotBlank()
+                    )
                 } else {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Привет, ${userName.trim()}!",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        IconButton(onClick = { isEditingName = true }) {
-                            Icon(Icons.Default.Edit, contentDescription = "Изменить имя")
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = initials,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
-                    }
-                }
-            }
-        }
-
-        item {
-            SectionCard(title = "Валюта") {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Currency.entries.forEach { c ->
-                        FilterChip(
-                            selected = currencyCode == c.code,
-                            onClick = { viewModel.setCurrency(c.code) },
-                            label = { Text("${c.symbol} ${c.code}") }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = userName.trim().ifBlank { "Пользователь" },
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "${currency.code} · ${currency.displayName}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -182,32 +202,41 @@ fun ProfileScreen(
         }
 
         item {
-            SectionCard(title = "Тема") {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    listOf(
-                        ThemeMode.SYSTEM to "Системная",
-                        ThemeMode.LIGHT to "Светлая",
-                        ThemeMode.DARK to "Тёмная"
-                    ).forEachIndexed { index, (mode, label) ->
-                        SegmentedButton(
-                            selected = themeMode == mode,
-                            onClick = { viewModel.setThemeMode(mode) },
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
-                            label = { Text(label) }
-                        )
+            WalletSurfaceCard {
+                SettingsRow(
+                    icon = Icons.Default.DarkMode,
+                    title = "Тема",
+                    subtitle = when (themeMode) {
+                        ThemeMode.SYSTEM -> "Системная"
+                        ThemeMode.LIGHT -> "Светлая"
+                        ThemeMode.DARK -> "Тёмная"
                     }
-                }
-            }
-        }
-
-        item {
-            SectionCard(title = "Уведомления") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                )
+                SegmentedToggle(
+                    options = listOf("Авто", "Свет", "Тёмн"),
+                    selectedIndex = when (themeMode) {
+                        ThemeMode.SYSTEM -> 0
+                        ThemeMode.LIGHT -> 1
+                        ThemeMode.DARK -> 2
+                    },
+                    onSelect = { index ->
+                        viewModel.setThemeMode(
+                            when (index) {
+                                0 -> ThemeMode.SYSTEM
+                                1 -> ThemeMode.LIGHT
+                                else -> ThemeMode.DARK
+                            }
+                        )
+                    },
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                SettingsRow(
+                    icon = Icons.Default.Notifications,
+                    title = "Вечернее напоминание",
+                    subtitle = notificationTimeLabel,
+                    onClick = { showTimePicker = true }
                 ) {
-                    Text("Вечернее напоминание")
                     Switch(
                         checked = notificationsEnabled,
                         onCheckedChange = { enabled ->
@@ -231,6 +260,19 @@ fun ProfileScreen(
                         }
                     )
                 }
+                Text(
+                    text = "Android может доставить напоминание немного позже выбранного времени.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                SettingsRow(
+                    icon = Icons.Default.UploadFile,
+                    title = "Импорт выписки",
+                    showChevron = true,
+                    onClick = onNavigateToImport
+                )
             }
         }
 
@@ -252,30 +294,41 @@ fun ProfileScreen(
         }
 
         items(categories, key = { it.id }) { category ->
-            CategoryRow(
-                category = category,
-                onEdit = { editingCategory = category },
-                onDelete = { if (!category.isSystem) viewModel.deleteCategory(category) }
-            )
-        }
-
-        item {
-            SectionCard(title = "История") {
-                Text(
-                    text = "Полный список операций с поиском по описанию.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(onClick = onNavigateToHistory, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Search, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Открыть историю")
+            val color = parseColorHex(category.colorHex)
+            WalletSurfaceCard(
+                modifier = Modifier.clickable { editingCategory = category }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CategoryBadge(category = category, color = color, size = 40.dp)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(category.name, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (category.type == TransactionType.INCOME) "Доход" else "Расход",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (!category.isSystem) {
+                        IconButton(onClick = { viewModel.deleteCategory(category) }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Удалить",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                 }
             }
         }
 
         item {
-            SectionCard(title = "Данные") {
+            WalletSurfaceCard {
+                Text("Данные", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -325,6 +378,7 @@ fun ProfileScreen(
     if (showDeleteAllDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteAllDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("Удалить все данные?") },
             text = { Text("Все транзакции будут удалены без возможности восстановления.") },
             confirmButton = {
@@ -344,6 +398,7 @@ fun ProfileScreen(
     if (showDeleteConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("Подтвердите удаление") },
             text = { Text("Это действие необратимо. Вы уверены?") },
             confirmButton = {
@@ -362,66 +417,34 @@ fun ProfileScreen(
             }
         )
     }
-}
 
-@Composable
-private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            content()
-        }
-    }
-}
-
-@Composable
-private fun CategoryRow(
-    category: CategoryData,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
-) {
-    val color = parseColorHex(category.colorHex)
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(color.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(getCategoryIcon(category.iconName), contentDescription = null, tint = color)
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(category.name, fontWeight = FontWeight.Medium)
-                Text(
-                    if (category.type == TransactionType.INCOME) "Доход" else "Расход",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            IconButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = "Изменить")
-            }
-            if (!category.isSystem) {
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Удалить", tint = MaterialTheme.colorScheme.error)
+    if (showTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = notificationHour,
+            initialMinute = notificationMinute,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("Время напоминания") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setNotificationTime(
+                        timePickerState.hour,
+                        timePickerState.minute,
+                        scheduler
+                    )
+                    showTimePicker = false
+                }) {
+                    Text("Сохранить")
                 }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("Отмена") }
             }
-        }
+        )
     }
 }
 
@@ -439,6 +462,7 @@ private fun CategoryEditDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
         title = { Text(if (existing == null) "Новая категория" else "Редактировать категорию") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -447,23 +471,16 @@ private fun CategoryEditDialog(
                     onValueChange = { name = it },
                     label = { Text("Название") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    shape = SmallShape
                 )
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    FilterChip(
-                        selected = type == TransactionType.EXPENSE,
-                        onClick = { type = TransactionType.EXPENSE },
-                        label = { Text("Расход") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    FilterChip(
-                        selected = type == TransactionType.INCOME,
-                        onClick = { type = TransactionType.INCOME },
-                        label = { Text("Доход") },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                SegmentedToggle(
+                    options = listOf("Расход", "Доход"),
+                    selectedIndex = if (type == TransactionType.EXPENSE) 0 else 1,
+                    onSelect = { index ->
+                        type = if (index == 0) TransactionType.EXPENSE else TransactionType.INCOME
+                    }
+                )
                 Text("Цвет", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     categoryColorOptions.forEach { hex ->
@@ -474,9 +491,7 @@ private fun CategoryEditDialog(
                                 .clip(CircleShape)
                                 .background(parseColorHex(hex))
                                 .clickable { colorHex = hex }
-                                .then(
-                                    if (selected) Modifier.padding(2.dp) else Modifier
-                                )
+                                .then(if (selected) Modifier.padding(2.dp) else Modifier)
                         )
                     }
                 }
@@ -493,9 +508,10 @@ private fun CategoryEditDialog(
             }
         },
         confirmButton = {
-            Button(
+            PrimaryCta(
+                text = "Сохранить",
                 onClick = {
-                    if (name.isBlank()) return@Button
+                    if (name.isBlank()) return@PrimaryCta
                     onSave(
                         CategoryData(
                             id = existing?.id ?: 0L,
@@ -506,10 +522,9 @@ private fun CategoryEditDialog(
                             isSystem = existing?.isSystem ?: false
                         )
                     )
-                }
-            ) {
-                Text("Сохранить")
-            }
+                },
+                enabled = name.isNotBlank()
+            )
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
