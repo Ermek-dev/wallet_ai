@@ -1,7 +1,7 @@
 # WalletAI — план развития
 
 > Личное приложение учёта доходов/расходов. Kotlin + Jetpack Compose + Room + KMP `shared/` + Gemini API.  
-> Обновлено: 2026-07-07. Архив старого аудита — в git-истории.
+> Обновлено: 2026-07-13. Архив старого аудита — в git-истории.
 
 ---
 
@@ -18,6 +18,18 @@
 | Профиль: валюта, тема, уведомления, история (поиск) | ✅ |
 | Git, AGENTS.md, CLAUDE.md, docs/ARCHITECTURE.md, `.claude/` | ✅ |
 | Unit-тесты `:shared:testAndroidHostTest`, `:app:testDebugUnitTest` | ✅ |
+| UX: семантика денег, календарные периоды, донат-аналитика, голос/PDF, напоминания | ✅ |
+
+---
+
+## Часть I. UX/UI, аналитика и ввод (2026-07-13) — выполнено
+
+- [x] **I1. Семантика денег** — доходы зелёные, расходы красные в списках, балансе и аналитике.
+- [x] **I2. Календарные периоды** — неделя/месяц/3 месяца по границам календаря (`CalendarMillis`, `PeriodLabels`), тесты в `shared`.
+- [x] **I3. Аналитика** — `DonutChart`, компактный рейтинг категорий, top-8 + «Прочее», `AnalyticsUiState`, экспорт по выбранному периоду.
+- [x] **I4. Напоминания** — `notificationMinute`, Material TimePicker, `ReminderDelayCalculator`, bootstrap при старте, переход по тапу на уведомление.
+- [x] **I5. Голос** — lifecycle SpeechRecognizer, UI «Слушаю…», disclosure облака Google, ошибка нулевой суммы, даты «сегодня/вчера» в парсере.
+- [x] **I6. Импорт** — `ImportUiState`, парсинг off-main, редактирование операции, нормализация дедупликации, golden-тесты PDF.
 
 ---
 
@@ -65,10 +77,10 @@
 - [~] **F2 🔴 Один `UiState` на экран** — `DashboardUiState` (combine 5 потоков + `WhileSubscribed(5_000)`) написан, DashboardScreen переключён. ⏳ Код готов, осталось: прогнать сборку и тесты.
 - [~] **F3 🔴 One-shot события** — `Channel<DashboardEvent>` (Deleted/SaveError/Info) написан, MainActivity собирает события, undo-payload в событии, магические строки удалены. ⏳ Код готов, осталось: сборка и тесты.
 - [~] **F4 🔴 Обучение классификатора** — подписка `combine(...).debounce(2000)` на `Dispatchers.Default`, ручные `trainModel()` удалены, `ensureModelTrained()` для мгновенной классификации до срабатывания дебаунса. ⏳ Код готов, осталось: сборка и тесты.
-- [ ] **F5 🟡 `AdviceResult` (sealed: Ai / Fallback)** — UI различает настоящий ответ ИИ и локальный отчёт (бейдж «офлайн-анализ», retry); `getFallbackAdvice` уходит из интерфейса.
-- [ ] **F6 🟡 Ключ API — одна точка правды** — проверка внутри `GeminiClient` (`GeminiKeyMissingException`), `apiKey` из конструктора репозитория убрать; маппинг исключений → `GeminiErrorMapper` + unit-тест.
-- [ ] **F7 🟡 `Settings` data class** — `Flow<Settings>` + `update(transform)` вместо 8×2 методов; `themeMode` → enum. Ключи DataStore не меняются — миграция не нужна.
-- [ ] **F8 🟡 Koin: разбить модуль** — `databaseModule` / `repositoryModule` / `aiModule` / `viewModelModule`; `viewModelOf(::Xxx)` вместо слепых `get()`; verify-тест `appModules.verify()`.
+- [x] **F5 🟡 `AdviceResult` (sealed: Ai / Fallback)** — `fromCache`, `cachedAtMillis`, бейдж кэша в UI.
+- [x] **F6 🟡 Ключ API — одна точка правды** — `AdviceAiClient`, `AiErrorMapper`, `GroqClient` + fallback Gemini.
+- [x] **F7 🟡 `Settings` data class** — `Flow<Settings>` + `update(transform)`, `ThemeMode` enum, `notificationMinute`.
+- [x] **F8 🟡 Koin: разбить модуль** — `databaseModule` / `repositoryModule` / `aiModule` / `viewModelModule`.
 - [ ] **F9 ⚪ Мелочи** — `Clock` в `shared/util` вместо `System.currentTimeMillis()`; убрать хардкод `ParsedPreview(id = 1)`; Turbine-тесты ViewModel (undo, voice-пайплайн); README под WalletAI; сид категорий из `MockDataProvider` → `data/seed/DefaultCategories.kt`.
 
 ---
@@ -90,21 +102,41 @@
 
 Этапы (каждый — тест сначала, всё в `shared/commonMain`, чистый Kotlin):
 
-- [ ] **G1. Фикстуры** — извлечь текст из обоих образцов через pdfbox (как это делает приложение) и положить фрагменты в `commonTest` как строки-фикстуры. Тесты пишутся против реального текста, а не выдуманного.
-- [ ] **G2. `StatementFormat` + детектор** — enum (KASPI, FREEDOM, GENERIC) по маркерам в тексте («Kaspi Bank» / «bankffin.kz», «Валюта Операция Детали»). GENERIC = текущий universal-парсер как fallback.
-- [ ] **G3. `KaspiStatementParser`** — якорь: строка начинается с `dd.MM.yy`, затем `+`/`-`, сумма `[\d ]+,\d{2}`, `₸`, тип операции, описание. Строки-продолжения («счет») подклеивать к предыдущей операции. Дата → epoch millis (ручной разбор, без java.time — KMP).
-- [ ] **G4. `FreedomStatementParser`** — якорь `dd.MM.yyyy`, сумма `-?[\d,]+\.\d{2}`, валюта: **не-KZT строки пропускать** (пока нет мультивалютных транзакций), «Сумма в обработке» = обычная операция (знак решает тип), многострочные детали склеивать до следующей даты.
+- [x] **G1. Фикстуры** — фрагменты в `commonTest`, golden-тесты PDF (`kaspi.pdf`, `freedom-.pdf`).
+- [x] **G2. `StatementFormat` + детектор** — enum (KASPI, FREEDOM, GENERIC).
+- [x] **G3. `KaspiStatementParser`** — якорь `dd.MM.yy`, склейка переносов.
+- [x] **G4. `FreedomStatementParser`** — якорь `dd.MM.yyyy`, пропуск не-KZT.
 - [ ] **G5. Категоризация (порядок приоритета):**
   1. merchant rules пользователя (уже есть);
   2. словарь мерчантов КЗ: MAGNUM/SUPERMARKET → Продукты; KFC/SELI POYELI/STARBUCKS/UMMA FOOD/BAURSAK → Кофе и Рестораны; WHOOSH/ОНАЙ/ONAY → Транспорт; Beeline/Tele2/Altel → Связь/Подписки; «Зарплата» → Зарплата;
   3. Naive Bayes классификатор (уже есть);
   4. тип операции: Перевод/Пополнение без мерчанта → системная категория **«Переводы»** (создать).
 - [ ] **G6. Внутренние переводы** — в Kaspi полно пар «Перевод на свой счет» + «Пополнение с карты другого банка», это не доход и не расход. В предпросмотре — переключатель «Пропускать переводы» (по умолчанию вкл. для пар, комиссии оставлять как расход).
-- [ ] **G7. Дедупликация** — при повторном импорте того же файла не создавать дубли: пропускать операции с совпадающими (дата, сумма, описание) среди уже существующих.
-- [ ] **G8. UI ImportScreen** — после разбора: сводка «Распознано N операций: X расходов на Σ, Y доходов на Σ, Z переводов пропущено», существующий предпросмотр с правкой категорий, кнопка «Сохранить все».
+- [x] **G7. Дедупликация** — `DescriptionNormalizer` (регистр, пробелы, пунктуация).
+- [x] **G8. UI ImportScreen** — `ImportUiState`, сводка, редактирование, липкая кнопка сохранения.
 - [ ] **G9. Приватность** — файл после разбора не хранится; в лог не пишется ни одна строка выписки; строки без «дата+сумма» (шапка с данными клиента) отбрасываются на первом шаге.
 
 Оценка: G1–G4 — 1–2 дня; G5–G7 — 1 день; G8–G9 — 0.5 дня.
+
+---
+
+## Часть H. ИИ-советник: миграция на Groq + кэширование (план от 2026-07-13)
+
+Проблема: Gemini отвечает 403/рейт-лимитами при активном тестировании. Каждое нажатие «Получить полный ИИ-анализ» = новый запрос (`AdvisorViewModel.loadAiFinancialAdvice()` → `AdviceRepositoryImpl.generateAdvice()` → `GeminiClient`), кэша нет. Решение: сменить провайдера на Groq (для тестов) + локальный кэш. **Redis не нужен** — это серверный кэш, а приложение работает на устройстве без бэкенда; кэшируем in-memory + DataStore.
+
+Этапы (тест сначала, логика — в `shared/commonMain`):
+
+- [x] **H1. Абстракция провайдера** — `AdviceAiClient` в `shared/ai`.
+- [x] **H2. `GroqClient`** — Ktor, OpenAI-совместимый API, `GroqDtos.kt`.
+- [x] **H3. Ключ и DI** — `GROQ_API_KEY` в `.env` → `BuildConfig`; `AiModule.kt`.
+- [x] **H4. Ошибки** — `AiErrorMapper`: 401/403/429/сеть.
+- [x] **H5. `AdviceCachePolicy`** — TTL 24 ч, хэш промпта, `forceRefresh`.
+- [x] **H6. Кэш в репозитории** — in-memory + `AdviceCacheDataStore`.
+- [x] **H7. UI** — guard Loading, «Обновить», «совет из кэша».
+
+Оценка: H1–H4 — 0.5–1 день; H5–H7 — 0.5–1 день. Проверка: `./gradlew :shared:testDebugUnitTest :app:testDebugUnitTest`.
+
+Замечание: 403 у Gemini — чаще проблема ключа/региона/биллинга (рейт-лимит — это 429); кэш снижает расход квоты, а сам 403 решается сменой провайдера.
 
 ---
 

@@ -1,14 +1,14 @@
 # WalletAI
 
-Личное Android-приложение учёта доходов и расходов: Kotlin, Jetpack Compose, Room, KMP-модуль `shared/`, Gemini API.
+Личное Android-приложение учёта доходов и расходов: Kotlin, Jetpack Compose, Room, KMP-модуль `shared/`, Groq API (советник) с кэшем и fallback на Gemini.
 
 ## Возможности
 
-- Учёт операций, категории, undo удаления
-- Голосовой ввод и импорт выписки (текст / PDF)
-- Аналитика расходов и доходов, экспорт CSV/PDF
-- ИИ-советник (Gemini) с офлайн-fallback
-- Профиль: валюта, тема, уведомления
+- Учёт операций, категории, undo удаления, семантика доход/расход
+- Голосовой ввод (системный SpeechRecognizer) и импорт выписки (текст / PDF)
+- Аналитика: донат-диаграмма, рейтинг категорий, календарные периоды, экспорт CSV/PDF
+- ИИ-советник (Groq) с кэшем 24 ч и офлайн-fallback
+- Профиль: валюта, тема, настраиваемое вечернее напоминание (WorkManager)
 
 ## Требования
 
@@ -17,7 +17,8 @@
 - Файл `.env` в корне проекта (см. `.env.example`)
 
 ```env
-GEMINI_API_KEY=ваш_ключ
+GROQ_API_KEY=ваш_ключ_groq
+GEMINI_API_KEY=опционально_для_fallback
 ```
 
 ## Сборка и тесты
@@ -33,8 +34,8 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`
 ## Структура
 
 ```
-app/       — Android UI, Room, DI (Koin)
-shared/    — KMP: domain, ML, Gemini (Ktor), unit-тесты
+app/       — Android UI, Room, DI (Koin), WorkManager, PDFBox
+shared/    — KMP: domain, ML, AI (Ktor/Groq), unit-тесты
 docs/      — ARCHITECTURE.md, PLAN.md
 ```
 
