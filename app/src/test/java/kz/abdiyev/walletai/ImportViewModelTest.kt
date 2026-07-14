@@ -10,10 +10,11 @@ import kz.abdiyev.walletai.test.FakeCategoryRepository
 import kz.abdiyev.walletai.test.FakeMerchantRuleRepository
 import kz.abdiyev.walletai.test.FakeSettingsRepository
 import kz.abdiyev.walletai.test.FakeTransactionRepository
+import kz.abdiyev.walletai.ui.viewmodel.ImportUiState
 import kz.abdiyev.walletai.ui.viewmodel.ImportViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -26,7 +27,7 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ImportViewModelTest {
-    private val testDispatcher = StandardTestDispatcher()
+    private val testDispatcher = UnconfinedTestDispatcher()
     private lateinit var transactionRepo: FakeTransactionRepository
     private lateinit var viewModel: ImportViewModel
 
@@ -79,7 +80,7 @@ class ImportViewModelTest {
         val previews = viewModel.parsedPreviews.value
         assertEquals(2, previews.size)
         assertTrue(previews.first { it.description.contains("Сұлтан") }.isDuplicate)
-        assertEquals(1, viewModel.importSummary.value?.duplicateCount)
+        assertEquals(1, (viewModel.uiState.value as ImportUiState.Preview).summary.duplicateCount)
     }
 
     @Test

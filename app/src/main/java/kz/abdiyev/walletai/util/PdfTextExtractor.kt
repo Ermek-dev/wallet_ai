@@ -17,4 +17,11 @@ object PdfTextExtractor {
             }
         }
     }
+
+    fun extractTextFromFile(context: Context, file: java.io.File): String {
+        PDFBoxResourceLoader.init(context.applicationContext)
+        return PDDocument.load(file).use { document ->
+            PDFTextStripper().getText(document)
+        }
+    }
 }
