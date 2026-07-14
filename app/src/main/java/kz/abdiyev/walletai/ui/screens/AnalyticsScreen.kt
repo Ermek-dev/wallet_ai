@@ -3,11 +3,9 @@ package kz.abdiyev.walletai.ui.screens
 
 
 import androidx.compose.foundation.layout.Arrangement
-
-import androidx.compose.foundation.layout.Box
-
 import androidx.compose.foundation.layout.Column
-
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 
 import androidx.compose.foundation.layout.Row
@@ -109,14 +107,14 @@ import kz.abdiyev.walletai.ui.viewmodel.AnalyticsChartMode
 import kz.abdiyev.walletai.ui.viewmodel.AnalyticsViewModel
 
 import kz.abdiyev.walletai.util.MoneyFormatter
-
+import kz.abdiyev.walletai.util.Plurals
 import kz.abdiyev.walletai.util.ShareHelper
 
 import java.io.File
 
 
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 @Composable
 
@@ -242,22 +240,6 @@ fun AnalyticsScreen(
 
         }
 
-        if (uiState.hiddenByPeriodCount > 0) {
-
-            item {
-
-                HiddenByPeriodHint(
-
-                    hiddenCount = uiState.hiddenByPeriodCount,
-
-                    onShowAll = { viewModel.setPeriod(Period.ALL) }
-
-                )
-
-            }
-
-        }
-
 
 
         item {
@@ -310,7 +292,10 @@ fun AnalyticsScreen(
 
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
 
                     InfoChip(
 
@@ -332,7 +317,7 @@ fun AnalyticsScreen(
 
                         InfoChip(
 
-                            text = "Сбережения ${"%.0f".format(uiState.savingsRate)}%",
+                            text = "Сбережения ${Plurals.formatSavingsRatePercent(uiState.savingsRate)}",
 
                             color = savingsColor
 
@@ -354,15 +339,15 @@ fun AnalyticsScreen(
 
                 WalletSurfaceCard {
 
-                    Box(
+                    Column(
 
                         modifier = Modifier
-
                             .fillMaxWidth()
+                            .padding(vertical = 24.dp, horizontal = 16.dp),
 
-                            .padding(vertical = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
 
-                        contentAlignment = Alignment.Center
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
 
                     ) {
 
@@ -383,6 +368,18 @@ fun AnalyticsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
 
                         )
+
+                        if (uiState.hiddenByPeriodCount > 0) {
+
+                            HiddenByPeriodHint(
+
+                                hiddenCount = uiState.hiddenByPeriodCount,
+
+                                onShowAll = { viewModel.setPeriod(Period.ALL) }
+
+                            )
+
+                        }
 
                     }
 

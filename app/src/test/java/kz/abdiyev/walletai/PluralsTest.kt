@@ -28,4 +28,11 @@ class PluralsTest {
     fun hiddenOutsidePeriodHint() {
         assertEquals("Ещё 3 операции вне периода", Plurals.hiddenOutsidePeriodHint(3))
     }
+
+    @Test
+    fun formatSavingsRatePercent_positiveAndNegative() {
+        assertEquals("25%", Plurals.formatSavingsRatePercent(25.4f))
+        assertEquals("−15%", Plurals.formatSavingsRatePercent(-15.3f))
+        assertEquals("0%", Plurals.formatSavingsRatePercent(0f))
+    }
 }

@@ -352,15 +352,6 @@ fun DashboardScreen(
                 }
             }
 
-            if (hiddenByPeriodCount > 0) {
-                item {
-                    HiddenByPeriodHint(
-                        hiddenCount = hiddenByPeriodCount,
-                        onShowAll = { viewModel.setPeriod(Period.ALL) }
-                    )
-                }
-            }
-
             if (filteredTransactions.isEmpty()) {
                 item {
                     Box(
@@ -369,11 +360,22 @@ fun DashboardScreen(
                             .padding(30.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "Нет записей за выбранный период",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = "Нет операций за период",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                            if (hiddenByPeriodCount > 0) {
+                                HiddenByPeriodHint(
+                                    hiddenCount = hiddenByPeriodCount,
+                                    onShowAll = { viewModel.setPeriod(Period.ALL) }
+                                )
+                            }
+                        }
                     }
                 }
             } else {
