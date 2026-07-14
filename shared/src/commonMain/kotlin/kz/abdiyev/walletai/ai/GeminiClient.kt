@@ -16,19 +16,13 @@ import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
-class GeminiApiException(val code: Int, message: String) : Exception(message)
-
-class GeminiTimeoutException : Exception("Gemini request timed out")
-
 /**
- * Multiplatform Gemini REST client (Ktor). The engine is picked per platform:
- * OkHttp on Android, Darwin on iOS. For a store release, migrate to a backend
- * proxy or Firebase AI Logic so the API key is not embedded in the app.
+ * Multiplatform Gemini REST client (Ktor). Kept as fallback provider.
  */
 class GeminiClient(
     private val apiKeyProvider: () -> String,
     engine: HttpClientEngine? = null
-) {
+) : AdviceAiClient {
     private val client: HttpClient =
         engine?.let { HttpClient(it) { configure() } } ?: HttpClient { configure() }
 
@@ -42,10 +36,10 @@ class GeminiClient(
         }
     }
 
-    suspend fun generateAdvice(prompt: String): String {
+    override suspend fun generateAdvice(prompt: String): String {
         val apiKey = apiKeyProvider()
         if (apiKey.isBlank() || apiKey == PLACEHOLDER_KEY) {
-            throw GeminiKeyMissingException()
+            throw AiKeyMissingException()
         }
 
         val response = try {
@@ -55,22 +49,22 @@ class GeminiClient(
                 setBody(GeminiRequest.fromPrompt(prompt))
             }
         } catch (e: HttpRequestTimeoutException) {
-            throw GeminiTimeoutException()
-        } catch (e: GeminiApiException) {
+            throw AiTimeoutException()
+        } catch (e: AiApiException) {
             throw e
-        } catch (e: GeminiKeyMissingException) {
+        } catch (e: AiKeyMissingException) {
             throw e
-        } catch (e: GeminiTimeoutException) {
+        } catch (e: AiTimeoutException) {
             throw e
         } catch (e: Exception) {
-            throw GeminiNetworkException("Сетевая ошибка, показан локальный анализ", e)
+            throw AiNetworkException("Сетевая ошибка, показан локальный анализ", e)
         }
 
         if (!response.status.isSuccess()) {
-            throw GeminiApiException(response.status.value, "Gemini API error ${response.status.value}")
+            throw AiApiException(response.status.value, "Gemini API error ${response.status.value}")
         }
         return response.body<GeminiResponse>().extractText()
-            ?: throw GeminiApiException(0, "Empty Gemini response")
+            ?: throw AiApiException(0, "Empty Gemini response")
     }
 
     companion object {
