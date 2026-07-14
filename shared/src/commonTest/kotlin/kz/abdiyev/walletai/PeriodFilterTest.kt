@@ -17,16 +17,50 @@ import kotlin.test.assertTrue
 class PeriodFilterTest {
 
     @Test
-    fun filter_week_excludesBeforeCurrentWeekStart() {
+    fun filter_week_excludesBeforeRollingWindowStart() {
         val now = StatementDate.toEpochMillis(2026, 7, 13) + 12 * 3_600_000L
         val weekStart = PeriodFilter.periodStartMillis(Period.WEEK, now, 0L)
         val txs = listOf(
-            tx(weekStart + 1_000L, "thisWeek"),
-            tx(weekStart - 1_000L, "lastWeek")
+            tx(weekStart + 1_000L, "inside"),
+            tx(weekStart - 1_000L, "outside")
         )
         val filtered = PeriodFilter.filter(txs, Period.WEEK, now, 0L)
         assertEquals(1, filtered.size)
-        assertEquals("thisWeek", filtered.first().description)
+        assertEquals("inside", filtered.first().description)
+    }
+
+    @Test
+    fun filter_week_includesSixDaysAgo_excludesSevenDaysAgo() {
+        val now = StatementDate.toEpochMillis(2026, 7, 13) + 12 * 3_600_000L
+        val sixDaysAgo = StatementDate.toEpochMillis(2026, 7, 7) + 12 * 3_600_000L
+        val sevenDaysAgo = StatementDate.toEpochMillis(2026, 7, 6) + 12 * 3_600_000L
+        val txs = listOf(
+            tx(sixDaysAgo, "sixDays"),
+            tx(sevenDaysAgo, "sevenDays")
+        )
+        val filtered = PeriodFilter.filter(txs, Period.WEEK, now, 0L)
+        assertEquals(1, filtered.size)
+        assertEquals("sixDays", filtered.first().description)
+    }
+
+    @Test
+    fun filter_week_includesLateLocalTimeOnSixthDayAgo_withTimeZoneOffset() {
+        val offset = 6 * 3_600_000L
+        val now = StatementDate.toEpochMillis(2026, 7, 13) + 10 * 3_600_000L
+        val todayLocal = CalendarMillis.fromEpochMillis(now + offset)
+        val sixDaysAgoLocal = CalendarMillis.addDays(todayLocal, -6)
+        val sixDaysAgoStart = CalendarMillis.toStartOfDay(sixDaysAgoLocal) - offset
+        val lateSixDaysAgo = sixDaysAgoStart + 23 * 3_600_000L + 59 * 60_000L
+        val sevenDaysAgoLocal = CalendarMillis.addDays(todayLocal, -7)
+        val sevenDaysAgoStart = CalendarMillis.toStartOfDay(sevenDaysAgoLocal) - offset
+        val lateSevenDaysAgo = sevenDaysAgoStart + 23 * 3_600_000L + 59 * 60_000L
+        val txs = listOf(
+            tx(lateSixDaysAgo, "inside"),
+            tx(lateSevenDaysAgo, "outside")
+        )
+        val filtered = PeriodFilter.filter(txs, Period.WEEK, now, offset)
+        assertEquals(1, filtered.size)
+        assertEquals("inside", filtered.first().description)
     }
 
     @Test
@@ -49,10 +83,31 @@ class PeriodFilterTest {
     }
 
     @Test
-    fun periodStartMillis_month_isFirstDayOfCurrentMonth() {
-        val now = StatementDate.toEpochMillis(2026, 7, 15)
+    fun periodStartMillis_week_isSixDaysBeforeToday() {
+        val now = StatementDate.toEpochMillis(2026, 7, 13) + 12 * 3_600_000L
+        val start = PeriodFilter.periodStartMillis(Period.WEEK, now, 0L)
+        assertEquals(StatementDate.toEpochMillis(2026, 7, 7), start)
+    }
+
+    @Test
+    fun periodStartMillis_month_isTwentyNineDaysBeforeToday() {
+        val now = StatementDate.toEpochMillis(2026, 7, 30)
         val start = PeriodFilter.periodStartMillis(Period.MONTH, now, 0L)
         assertEquals(StatementDate.toEpochMillis(2026, 7, 1), start)
+    }
+
+    @Test
+    fun filter_month_includesTwentyNineDaysAgo_excludesThirtyDaysAgo() {
+        val now = StatementDate.toEpochMillis(2026, 7, 30) + 12 * 3_600_000L
+        val twentyNineDaysAgo = StatementDate.toEpochMillis(2026, 7, 1) + 12 * 3_600_000L
+        val thirtyDaysAgo = StatementDate.toEpochMillis(2026, 6, 30) + 12 * 3_600_000L
+        val txs = listOf(
+            tx(twentyNineDaysAgo, "twentyNine"),
+            tx(thirtyDaysAgo, "thirty")
+        )
+        val filtered = PeriodFilter.filter(txs, Period.MONTH, now, 0L)
+        assertEquals(1, filtered.size)
+        assertEquals("twentyNine", filtered.first().description)
     }
 
     @Test
@@ -105,17 +160,17 @@ class PeriodFilterTest {
     }
 
     @Test
-    fun filter_month_excludesImportedStatementDatesFromPreviousMonth() {
+    fun filter_month_excludesTransactionsOlderThanThirtyDays() {
         val now = StatementDate.toEpochMillis(2026, 7, 13) + 12 * 3_600_000L
-        val juneImported = StatementDate.toEpochMillis(2026, 6, 30)
-        val julyManual = StatementDate.toEpochMillis(2026, 7, 13) + 3_600_000L
+        val olderThanWindow = StatementDate.toEpochMillis(2026, 6, 1)
+        val withinWindow = StatementDate.toEpochMillis(2026, 7, 13) + 3_600_000L
         val txs = listOf(
-            tx(juneImported, "imported"),
-            tx(julyManual, "manual")
+            tx(olderThanWindow, "old"),
+            tx(withinWindow, "recent")
         )
         val month = PeriodFilter.filter(txs, Period.MONTH, now, 0L)
         assertEquals(1, month.size)
-        assertEquals("manual", month.first().description)
+        assertEquals("recent", month.first().description)
 
         val all = PeriodFilter.filter(txs, Period.ALL, now, 0L)
         assertEquals(2, all.size)
@@ -130,17 +185,17 @@ class PeriodFilterTest {
     }
 
     @Test
-    fun outsideCount_month_countsTransactionsOutsideCurrentMonth() {
+    fun outsideCount_month_countsTransactionsOlderThanThirtyDays() {
         val now = StatementDate.toEpochMillis(2026, 7, 13) + 12 * 3_600_000L
-        val juneImported = StatementDate.toEpochMillis(2026, 6, 30)
-        val julyManual = StatementDate.toEpochMillis(2026, 7, 13) + 3_600_000L
-        val txs = listOf(tx(juneImported, "imported"), tx(julyManual, "manual"))
+        val olderThanWindow = StatementDate.toEpochMillis(2026, 6, 1)
+        val withinWindow = StatementDate.toEpochMillis(2026, 7, 13) + 3_600_000L
+        val txs = listOf(tx(olderThanWindow, "old"), tx(withinWindow, "recent"))
         assertEquals(1, PeriodFilter.outsideCount(txs, Period.MONTH, now, 0L))
         assertEquals(0, PeriodFilter.outsideCount(txs, Period.ALL, now, 0L))
     }
 
     @Test
-    fun outsideCount_week_countsTransactionsOutsideCurrentWeek() {
+    fun outsideCount_week_countsTransactionsOutsideRollingWindow() {
         val now = StatementDate.toEpochMillis(2026, 7, 13) + 12 * 3_600_000L
         val weekStart = PeriodFilter.periodStartMillis(Period.WEEK, now, 0L)
         val txs = listOf(

@@ -63,8 +63,8 @@ object CalendarMillis {
         val localMillis = nowMillis + timeZoneOffsetMs
         val today = fromEpochMillis(localMillis)
         val startDate = when (period) {
-            Period.WEEK -> startOfWeek(today)
-            Period.MONTH -> startOfMonth(today)
+            Period.WEEK -> addDays(today, -6)
+            Period.MONTH -> addDays(today, -29)
             else -> return 0L
         }
         return toStartOfDay(startDate) - timeZoneOffsetMs

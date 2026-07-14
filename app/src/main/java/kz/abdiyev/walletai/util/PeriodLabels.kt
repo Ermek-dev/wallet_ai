@@ -36,10 +36,7 @@ object PeriodLabels {
         }
         val offset = TimeZone.getDefault().getOffset(nowMillis).toLong()
         val start = PeriodFilter.periodStartMillis(period, nowMillis, offset)
-        val endInclusive = when (period) {
-            Period.WEEK -> CalendarMillis.weekEndInclusiveMillis(nowMillis, offset)
-            else -> CalendarMillis.toLocalEndExclusive(nowMillis, offset) - 1
-        }
+        val endInclusive = CalendarMillis.toLocalEndExclusive(nowMillis, offset) - 1
         return formatInclusiveRange(start, endInclusive)
     }
 
