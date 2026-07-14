@@ -34,14 +34,16 @@ class AdvisorViewModel(
     private val _advisorState = MutableStateFlow<AdvisorUiState>(AdvisorUiState.Idle)
     val advisorState: StateFlow<AdvisorUiState> = _advisorState.asStateFlow()
 
-    fun loadAiFinancialAdvice() {
+    fun loadAiFinancialAdvice(forceRefresh: Boolean = false) {
+        if (_advisorState.value is AdvisorUiState.Loading) return
         _advisorState.value = AdvisorUiState.Loading
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val result = adviceRepository.generateAdvice(
                     transactionRepository.getAll(),
                     categoryRepository.getAll(),
-                    settings.value.currencyCode
+                    settings.value.currencyCode,
+                    forceRefresh = forceRefresh
                 )
                 _advisorState.value = AdvisorUiState.Success(result)
             } catch (e: Exception) {
@@ -50,7 +52,12 @@ class AdvisorViewModel(
         }
     }
 
+    fun refreshAiFinancialAdvice() {
+        loadAiFinancialAdvice(forceRefresh = true)
+    }
+
     fun loadLocalFinancialAdvice() {
+        if (_advisorState.value is AdvisorUiState.Loading) return
         _advisorState.value = AdvisorUiState.Loading
         viewModelScope.launch(Dispatchers.IO) {
             val result = adviceRepository.localAdvice(

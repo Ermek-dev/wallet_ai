@@ -19,7 +19,7 @@ val repositoryModule = module {
     single<TransactionRepository> { TransactionRepositoryImpl(get()) }
     single<CategoryRepository> { CategoryRepositoryImpl(get(), get()) }
     single<SettingsRepository> { SettingsRepositoryImpl(get()) }
-    single<AdviceRepository> { AdviceRepositoryImpl(get()) }
+    single<AdviceRepository> { AdviceRepositoryImpl(get(), get()) }
     single<MerchantRuleRepository> { MerchantRuleRepositoryImpl(get()) }
     single<MaintenanceRepository> { MaintenanceRepositoryImpl(get()) }
     single { Exporter() }

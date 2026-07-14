@@ -36,7 +36,8 @@ interface AdviceRepository {
     suspend fun generateAdvice(
         transactions: List<TransactionData>,
         categories: List<CategoryData>,
-        currencyCode: String
+        currencyCode: String,
+        forceRefresh: Boolean = false
     ): AdviceResult
 
     fun localAdvice(

@@ -21,7 +21,7 @@ class AdvisorViewModelTest {
     fun loadAiFinancialAdvice_emitsAiResult() = runTest {
         val viewModel = AdvisorViewModel(
             adviceRepository = FakeAdviceRepository(
-                generateResult = AdviceResult.Ai("Gemini response")
+                generateResult = AdviceResult.Ai("AI response")
             ),
             transactionRepository = FakeTransactionRepository(),
             categoryRepository = FakeCategoryRepository(),
@@ -35,7 +35,7 @@ class AdvisorViewModelTest {
             val success = awaitItem()
             assertTrue(success is AdvisorUiState.Success)
             assertEquals(
-                AdviceResult.Ai("Gemini response"),
+                AdviceResult.Ai("AI response"),
                 (success as AdvisorUiState.Success).result
             )
             cancelAndIgnoreRemainingEvents()
@@ -60,6 +60,28 @@ class AdvisorViewModelTest {
             val result = (success as AdvisorUiState.Success).result
             assertTrue(result is AdviceResult.Fallback)
             assertEquals("Ручной запуск", (result as AdviceResult.Fallback).reason)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun loadAiFinancialAdvice_ignoresDuplicateCallWhileLoading() = runTest {
+        val viewModel = AdvisorViewModel(
+            adviceRepository = FakeAdviceRepository(
+                generateResult = AdviceResult.Ai("AI response")
+            ),
+            transactionRepository = FakeTransactionRepository(),
+            categoryRepository = FakeCategoryRepository(),
+            settingsRepository = FakeSettingsRepository()
+        )
+
+        viewModel.advisorState.test {
+            assertEquals(AdvisorUiState.Idle, awaitItem())
+            viewModel.loadAiFinancialAdvice()
+            assertEquals(AdvisorUiState.Loading, awaitItem())
+            viewModel.loadAiFinancialAdvice()
+            val success = awaitItem()
+            assertTrue(success is AdvisorUiState.Success)
             cancelAndIgnoreRemainingEvents()
         }
     }
