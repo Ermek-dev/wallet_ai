@@ -23,11 +23,11 @@ class VoiceRecognizerHelper(
             onError(SpeechRecognizer.ERROR_CLIENT)
             return
         }
-        val recognizer = speechRecognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also {
-            speechRecognizer = it
+        speechRecognizer?.destroy()
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
             it.setRecognitionListener(createListener())
+            it.startListening(createIntent())
         }
-        recognizer.startListening(createIntent())
     }
 
     fun stopListening() {

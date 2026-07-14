@@ -7,7 +7,8 @@ import kz.abdiyev.walletai.domain.model.TransactionType
 data class VoiceParseResult(
     val money: Money?,
     val type: TransactionType,
-    val description: String
+    val description: String,
+    val dateMillis: Long? = null
 )
 
 class VoiceInputParser {
@@ -47,7 +48,7 @@ class VoiceInputParser {
     private val thousandWords = setOf("тысяча", "тысячи", "тысяч", "тыща", "тыщи", "тыс")
     private val thousandSuffixes = setOf("k", "к", "тыс", "тысяч")
 
-    fun parse(text: String, defaultCurrency: Currency = Currency.KZT): VoiceParseResult {
+    fun parse(text: String, defaultCurrency: Currency = Currency.KZT, referenceMillis: Long = 0L): VoiceParseResult {
         val lower = text.lowercase().trim()
         val type = when {
             incomeWords.any { lower.contains(it) } -> TransactionType.INCOME
@@ -75,12 +76,24 @@ class VoiceInputParser {
         }
 
         val description = buildDescription(normalized, match?.value, numberWordsUsed)
+        val dateMillis = parseRelativeDate(lower, referenceMillis)
 
         return VoiceParseResult(
             money = money,
             type = type,
-            description = if (description.isBlank()) text.trim() else description
+            description = if (description.isBlank()) text.trim() else description,
+            dateMillis = dateMillis
         )
+    }
+
+    private fun parseRelativeDate(lower: String, referenceMillis: Long): Long? {
+        if (referenceMillis <= 0L) return null
+        val dayMs = 86_400_000L
+        return when {
+            lower.contains("вчера") -> referenceMillis - dayMs
+            lower.contains("сегодня") -> referenceMillis
+            else -> null
+        }
     }
 
     /**
