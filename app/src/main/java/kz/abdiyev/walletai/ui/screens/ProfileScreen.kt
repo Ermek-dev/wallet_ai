@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -98,6 +99,7 @@ fun ProfileScreen(
     val notificationsEnabled = settings.notificationsEnabled
     val notificationHour = settings.notificationHour
     val notificationMinute = settings.notificationMinute
+    val dynamicEffects = settings.dynamicEffects
     val currency = remember(currencyCode) { Currency.fromCode(currencyCode) }
 
     var localUserName by remember(userName) { mutableStateOf(userName) }
@@ -230,6 +232,17 @@ fun ProfileScreen(
                     },
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                SettingsRow(
+                    icon = Icons.Default.TouchApp,
+                    title = "Динамические эффекты",
+                    subtitle = "Свечение при наклоне телефона"
+                ) {
+                    Switch(
+                        checked = dynamicEffects,
+                        onCheckedChange = viewModel::setDynamicEffects
+                    )
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 SettingsRow(
                     icon = Icons.Default.Notifications,
