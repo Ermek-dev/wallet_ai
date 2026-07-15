@@ -80,6 +80,7 @@ import kz.abdiyev.walletai.ui.components.PeriodRangePickerDialog
 import kz.abdiyev.walletai.ui.components.SegmentedPeriodSelector
 import kz.abdiyev.walletai.ui.components.TransactionRow
 import kz.abdiyev.walletai.ui.components.WalletSurfaceCard
+import kz.abdiyev.walletai.ui.components.tiltGlow
 import kz.abdiyev.walletai.ui.components.getCategoryIcon
 import kz.abdiyev.walletai.ui.theme.FabDark
 import kz.abdiyev.walletai.ui.theme.FabShape
@@ -405,6 +406,7 @@ fun DashboardScreen(
                 onClick = {
                     if (isListening) voiceHelper?.stopListening() else startVoiceInput()
                 },
+                modifier = Modifier.tiltGlow(shape = FabShape, intensity = 0.25f, maxShiftDp = 6.dp),
                 containerColor = if (isListening) {
                     MaterialTheme.colorScheme.errorContainer
                 } else {
@@ -418,6 +420,7 @@ fun DashboardScreen(
             }
             FloatingActionButton(
                 onClick = { showAddDialog = true },
+                modifier = Modifier.tiltGlow(shape = FabShape, intensity = 0.3f),
                 shape = FabShape,
                 containerColor = if (isDark) MaterialTheme.colorScheme.primary else FabDark,
                 contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White

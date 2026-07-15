@@ -509,7 +509,9 @@ fun WalletSurfaceCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .tiltGlow(shape = CardShape),
         shape = CardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -591,6 +593,7 @@ fun InfoChip(
         style = MaterialTheme.typography.labelSmall,
         color = chipColor,
         modifier = modifier
+            .tiltGlow(shape = SmallShape, intensity = 0.2f, maxShiftDp = 4.dp)
             .clip(SmallShape)
             .background(
                 if (color != null) color.copy(alpha = 0.12f)

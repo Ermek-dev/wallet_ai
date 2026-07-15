@@ -37,6 +37,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kz.abdiyev.walletai.ui.components.TiltGlowProvider
+import kz.abdiyev.walletai.ui.components.rememberDynamicTiltOffset
+import kz.abdiyev.walletai.ui.components.tiltGlow
 import kz.abdiyev.walletai.ui.navigation.WalletAiRoutes
 import kz.abdiyev.walletai.ui.screens.AdvisorScreen
 import kz.abdiyev.walletai.ui.screens.AnalyticsScreen
@@ -114,6 +117,8 @@ fun MainAppScreen() {
     }
 
     WalletAiTheme(themeMode = settings.themeMode) {
+        val tiltOffset = rememberDynamicTiltOffset(settings.dynamicEffects)
+        TiltGlowProvider(tiltOffset) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = MaterialTheme.colorScheme.background,
@@ -121,6 +126,7 @@ fun MainAppScreen() {
             bottomBar = {
                 if (showBottomBar) {
                     NavigationBar(
+                        modifier = Modifier.tiltGlow(intensity = 0.15f, maxShiftDp = 4.dp),
                         containerColor = MaterialTheme.colorScheme.background,
                         tonalElevation = 0.dp
                     ) {
@@ -245,6 +251,7 @@ fun MainAppScreen() {
                     }
                 }
             }
+        }
         }
     }
 }
