@@ -4,19 +4,19 @@ import android.content.Context
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import java.util.Calendar
+import kz.abdiyev.walletai.util.ReminderDelayCalculator
+import kz.abdiyev.walletai.util.TimeUtils
 import java.util.concurrent.TimeUnit
 
 class ReminderScheduler(private val context: Context) {
-    fun scheduleDailyReminder(hour: Int) {
-        val now = Calendar.getInstance()
-        var target = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-        }
-        if (target.before(now)) target.add(Calendar.DAY_OF_YEAR, 1)
-        val delay = target.timeInMillis - now.timeInMillis
+    fun scheduleDailyReminder(hour: Int, minute: Int = 0) {
+        val now = System.currentTimeMillis()
+        val delay = ReminderDelayCalculator.initialDelayMillis(
+            nowMillis = now,
+            hour = hour,
+            minute = minute,
+            timeZoneOffsetMs = TimeUtils.localOffsetMillis(now)
+        )
 
         val request = PeriodicWorkRequestBuilder<ReminderWorker>(24, TimeUnit.HOURS)
             .setInitialDelay(delay, TimeUnit.MILLISECONDS)

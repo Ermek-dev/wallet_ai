@@ -23,10 +23,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -61,7 +61,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,35 +72,58 @@ import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.Period
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.ui.components.BalanceSummaryRow
+import kz.abdiyev.walletai.ui.components.DayGroupCard
+import kz.abdiyev.walletai.ui.components.HiddenByPeriodHint
+import kz.abdiyev.walletai.ui.components.MonthHeader
+import kz.abdiyev.walletai.ui.components.PeriodRangePickerDialog
+import kz.abdiyev.walletai.ui.components.SegmentedPeriodSelector
+import kz.abdiyev.walletai.ui.components.TransactionRow
+import kz.abdiyev.walletai.ui.components.WalletSurfaceCard
 import kz.abdiyev.walletai.ui.components.getCategoryIcon
+import kz.abdiyev.walletai.ui.theme.FabDark
+import kz.abdiyev.walletai.ui.theme.FabShape
+import kz.abdiyev.walletai.ui.theme.CardShape
+import kz.abdiyev.walletai.ui.theme.SmallShape
 import kz.abdiyev.walletai.ui.theme.WalletAiTheme
+import kz.abdiyev.walletai.util.groupTransactionsByDay
 import kz.abdiyev.walletai.ui.viewmodel.DashboardViewModel
 import kz.abdiyev.walletai.ui.viewmodel.ParsedPreview
 import kz.abdiyev.walletai.ui.voice.VoiceRecognizerHelper
 import kz.abdiyev.walletai.util.MoneyFormatter
+import kz.abdiyev.walletai.util.PeriodLabels
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
+    userName: String = "",
     onLoadDemo: () -> Unit = {},
+    onNavigateToHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val categories by viewModel.categories.collectAsStateWithLifecycle()
-    val filteredTransactions by viewModel.filteredTransactions.collectAsStateWithLifecycle()
-    val parsedPreviews by viewModel.parsedPreviews.collectAsStateWithLifecycle()
-    val voicePreview by viewModel.voicePreview.collectAsStateWithLifecycle()
-    val selectedPeriod by viewModel.selectedPeriod.collectAsStateWithLifecycle()
-    val currencyCode by viewModel.currencyCode.collectAsStateWithLifecycle()
-    val onboardingDone by viewModel.onboardingDone.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val onboardingReady by viewModel.onboardingReady.collectAsStateWithLifecycle()
+
+    val categories = uiState.categories
+    val filteredTransactions = uiState.filteredTransactions
+    val hiddenByPeriodCount = uiState.hiddenByPeriodCount
+    val voicePreview = uiState.voicePreview
+    val selectedPeriod = uiState.selectedPeriod
+    val customRange = uiState.customRange
+    val currencyCode = uiState.currencyCode
 
     val currency = remember(currencyCode) { Currency.fromCode(currencyCode) }
     val financialColors = WalletAiTheme.financialColors
-    val recentTransactions = remember(filteredTransactions) { filteredTransactions.take(5) }
+    val dayGroups = remember(filteredTransactions) { groupTransactionsByDay(filteredTransactions) }
+    val periodTitle = remember(selectedPeriod, customRange) { PeriodLabels.title(selectedPeriod, customRange = customRange) }
+    val periodRange = remember(selectedPeriod, customRange) { PeriodLabels.rangeLabel(selectedPeriod, customRange = customRange) }
+    val initials = remember(userName) { userName.trim().take(2).ifBlank { "?" } }
+
+    var showPeriodPicker by remember { mutableStateOf(false) }
 
     val expenses = filteredTransactions.filter { it.type == TransactionType.EXPENSE }
         .fold(Money(0, currency)) { acc, tx -> acc + tx.money }
@@ -112,16 +134,13 @@ fun DashboardScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var editingTransaction by remember { mutableStateOf<TransactionData?>(null) }
     var editingVoicePreview by remember { mutableStateOf(false) }
-    var statementInputText by remember { mutableStateOf("") }
     var isListening by remember { mutableStateOf(false) }
     var voiceTextFallback by remember { mutableStateOf("") }
     var showVoiceFallback by remember { mutableStateOf(false) }
 
-    val focusManager = LocalFocusManager.current
     val dateFormatter = remember { SimpleDateFormat("dd.MM.yyyy", Locale("ru")) }
     var pendingVoiceStart by remember { mutableStateOf(false) }
-    var showOnboarding by remember { mutableStateOf(false) }
-    var onboardingInitialized by remember { mutableStateOf(false) }
+    val showOnboarding = onboardingReady == false
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -132,13 +151,9 @@ fun DashboardScreen(
     var voiceHelper by remember { mutableStateOf<VoiceRecognizerHelper?>(null) }
 
     DisposableEffect(context) {
-        onDispose { voiceHelper?.stopListening() }
-    }
-
-    LaunchedEffect(onboardingDone) {
-        if (!onboardingInitialized) {
-            showOnboarding = !onboardingDone
-            onboardingInitialized = true
+        onDispose {
+            voiceHelper?.destroy()
+            voiceHelper = null
         }
     }
 
@@ -150,7 +165,10 @@ fun DashboardScreen(
                 viewModel.parseVoiceInput(text)
                 showVoiceFallback = false
             },
-            onError = { showVoiceFallback = true },
+            onError = { errorCode ->
+                viewModel.showMessage(VoiceRecognizerHelper.userMessageForError(errorCode))
+                showVoiceFallback = true
+            },
             onListeningChanged = { listening -> isListening = listening }
         ).also { it.startListening() }
     }
@@ -182,7 +200,6 @@ fun DashboardScreen(
     if (showOnboarding) {
         AlertDialog(
             onDismissRequest = {
-                showOnboarding = false
                 viewModel.completeOnboarding(loadDemo = false)
             },
             title = { Text("Добро пожаловать в WalletAI") },
@@ -191,7 +208,6 @@ fun DashboardScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    showOnboarding = false
                     viewModel.completeOnboarding(loadDemo = true)
                     onLoadDemo()
                 }) {
@@ -200,7 +216,6 @@ fun DashboardScreen(
             },
             dismissButton = {
                 TextButton(onClick = {
-                    showOnboarding = false
                     viewModel.completeOnboarding(loadDemo = false)
                 }) {
                     Text("Чистый старт")
@@ -215,56 +230,70 @@ fun DashboardScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp)
+            contentPadding = PaddingValues(bottom = 100.dp, top = 16.dp)
         ) {
             item {
-                BalanceCard(
-                    balance = totalBalance,
-                    incomes = incomes,
-                    expenses = expenses,
-                    incomeColor = financialColors.income,
-                    expenseColor = financialColors.expense
-                )
+                MonthHeader(monthLabel = periodTitle, initials = initials)
             }
 
             item {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Period.entries.forEach { period ->
-                        FilterChip(
-                            selected = selectedPeriod == period,
-                            onClick = { viewModel.setPeriod(period) },
-                            label = { Text(period.labelRu) }
-                        )
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Баланс",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = MoneyFormatter.formatBalance(totalBalance),
+                        style = MaterialTheme.typography.displayMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (totalBalance.amountMinor >= 0) financialColors.income else financialColors.expense
+                    )
+                    BalanceSummaryRow(
+                        incomesText = MoneyFormatter.format(incomes, showSign = false),
+                        expensesText = MoneyFormatter.format(expenses, showSign = false),
+                        incomeColor = financialColors.income,
+                        expenseColor = financialColors.expense
+                    )
                 }
             }
 
             item {
-                StatementImportCard(
-                    text = statementInputText,
-                    onTextChange = { statementInputText = it },
-                    onParse = {
-                        viewModel.parseBankStatement(statementInputText)
-                        statementInputText = ""
-                        focusManager.clearFocus()
-                    },
-                    onClear = { statementInputText = "" }
+                SegmentedPeriodSelector(
+                    selected = selectedPeriod,
+                    hasCustomRange = customRange != null,
+                    onSelectPreset = viewModel::setPeriod,
+                    onCustomClick = { showPeriodPicker = true }
                 )
             }
 
-            if (parsedPreviews.isNotEmpty()) {
+            if (selectedPeriod != Period.ALL) {
                 item {
-                    ParsedPreviewsCard(
-                        previews = parsedPreviews,
-                        categories = categories,
-                        currency = currency,
-                        onUpdateCategory = viewModel::updatePreviewCategory,
-                        onClear = viewModel::clearPreviews,
-                        onCommit = viewModel::commitPreviews
+                    Text(
+                        text = periodRange,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            if (isListening) {
+                item {
+                    WalletSurfaceCard {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Слушаю…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "Пример: «потратил 1500 на обед»",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Системное распознавание речи может отправлять аудио в облако Google. Всегда можно ввести операцию вручную.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 
@@ -274,8 +303,8 @@ fun DashboardScreen(
                         preview = preview,
                         categories = categories,
                         currency = currency,
-                        onUpdateCategory = { viewModel.updatePreviewCategory(preview.id, it) },
-                        onClear = { viewModel.clearPreviews() },
+                        onUpdateCategory = { viewModel.updateVoicePreviewCategory(it) },
+                        onClear = { viewModel.clearVoicePreview() },
                         onEdit = { editingVoicePreview = true },
                         onCommit = viewModel::commitVoicePreview
                     )
@@ -294,20 +323,36 @@ fun DashboardScreen(
                                 showVoiceFallback = false
                             }
                         },
+                        onRetry = {
+                            showVoiceFallback = false
+                            startVoiceInput()
+                        },
                         onDismiss = { showVoiceFallback = false }
                     )
                 }
             }
 
             item {
-                Text(
-                    text = "Последние операции",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Операции",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Все",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable(onClick = onNavigateToHistory)
+                    )
+                }
             }
 
-            if (recentTransactions.isEmpty()) {
+            if (filteredTransactions.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -315,29 +360,40 @@ fun DashboardScreen(
                             .padding(30.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "Нет записей за выбранный период",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = "Нет операций за период",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                            if (hiddenByPeriodCount > 0) {
+                                HiddenByPeriodHint(
+                                    hiddenCount = hiddenByPeriodCount,
+                                    onShowAll = { viewModel.setPeriod(Period.ALL) }
+                                )
+                            }
+                        }
                     }
                 }
             } else {
-                items(recentTransactions, key = { it.id }) { tx ->
-                    val category = categories.find { it.id == tx.categoryId }
-                    TransactionListItem(
-                        transaction = tx,
-                        category = category,
-                        dateFormatter = dateFormatter,
+                item {
+                    DayGroupCard(
+                        dayGroups = dayGroups,
+                        categories = categories,
                         incomeColor = financialColors.income,
                         expenseColor = financialColors.expense,
-                        onClick = { editingTransaction = tx },
-                        onDelete = { viewModel.deleteTransaction(tx) }
+                        onTransactionClick = { editingTransaction = it },
+                        onTransactionDelete = viewModel::deleteTransaction,
+                        parseColorHex = ::parseColorHex
                     )
                 }
             }
         }
 
+        val isDark = isSystemInDarkTheme()
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -360,10 +416,22 @@ fun DashboardScreen(
                     contentDescription = if (isListening) "Остановить запись" else "Голосовой ввод"
                 )
             }
-            FloatingActionButton(onClick = { showAddDialog = true }) {
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                shape = FabShape,
+                containerColor = if (isDark) MaterialTheme.colorScheme.primary else FabDark,
+                contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+            ) {
                 Icon(Icons.Default.Add, contentDescription = "Добавить операцию")
             }
         }
+    }
+
+    if (showPeriodPicker) {
+        PeriodRangePickerDialog(
+            onDismiss = { showPeriodPicker = false },
+            onConfirm = viewModel::applyCustomRange
+        )
     }
 
     if (showAddDialog) {
@@ -480,107 +548,6 @@ private fun BalanceCard(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatementImportCard(
-    text: String,
-    onTextChange: (String) -> Unit,
-    onParse: () -> Unit,
-    onClear: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = "Импорт из выписки / SMS",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Вставьте строки из банковской выписки. ML-модель определит категории автоматически.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-            )
-            OutlinedTextField(
-                value = text,
-                onValueChange = onTextChange,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = {
-                    Text(
-                        "01.07 Magnum продукты 4500₸\nKaspi перевод +150000₸",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                },
-                maxLines = 4,
-                textStyle = MaterialTheme.typography.bodySmall,
-                shape = RoundedCornerShape(8.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (text.isNotBlank()) {
-                    TextButton(onClick = onClear) { Text("Сбросить") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                Button(onClick = onParse, enabled = text.isNotBlank(), shape = RoundedCornerShape(10.dp)) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Анализировать")
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ParsedPreviewsCard(
-    previews: List<ParsedPreview>,
-    categories: List<CategoryData>,
-    currency: Currency,
-    onUpdateCategory: (Long, Long) -> Unit,
-    onClear: () -> Unit,
-    onCommit: () -> Unit
-) {
-    PreviewCardShell(
-        title = "Предпросмотр (${previews.size})",
-        onClose = onClear
-    ) {
-        previews.forEach { preview ->
-            PreviewItem(
-                preview = preview,
-                categories = categories,
-                currency = currency,
-                onUpdateCategory = { onUpdateCategory(preview.id, it) }
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            TextButton(onClick = onClear) { Text("Отмена") }
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onCommit, shape = RoundedCornerShape(10.dp)) {
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Сохранить все (${previews.size})")
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
 private fun VoicePreviewCard(
     preview: ParsedPreview,
     categories: List<CategoryData>,
@@ -607,50 +574,52 @@ private fun VoicePreviewCard(
                 Text("Изменить")
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onCommit, shape = RoundedCornerShape(10.dp)) {
+            val canCommit = preview.money.amountMinor > 0
+            Button(
+                onClick = onCommit,
+                enabled = canCommit,
+                shape = RoundedCornerShape(10.dp)
+            ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Сохранить")
             }
         }
+        if (preview.money.amountMinor <= 0) {
+            Text(
+                text = "Не удалось определить сумму — отредактируйте операцию вручную.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
     }
 }
 
 @Composable
-private fun PreviewCardShell(
+internal fun PreviewCardShell(
     title: String,
     onClose: () -> Unit,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    WalletSurfaceCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = MaterialTheme.colorScheme.error)
-                }
+            Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            content()
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        content()
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PreviewItem(
+internal fun PreviewItem(
     preview: ParsedPreview,
     categories: List<CategoryData>,
     currency: Currency,
@@ -713,6 +682,7 @@ private fun VoiceFallbackCard(
     text: String,
     onTextChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
     Card(
@@ -721,7 +691,12 @@ private fun VoiceFallbackCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Голос недоступен — введите фразу вручную", fontWeight = FontWeight.Bold)
+            Text("Не удалось распознать голос", fontWeight = FontWeight.Bold)
+            Text(
+                text = "Повторите команду или введите фразу вручную. Распознавание может использовать облачный сервис Google.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             OutlinedTextField(
                 value = text,
                 onValueChange = onTextChange,
@@ -730,6 +705,7 @@ private fun VoiceFallbackCard(
             )
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                 TextButton(onClick = onDismiss) { Text("Отмена") }
+                TextButton(onClick = onRetry) { Text("Повторить") }
                 Button(onClick = onSubmit, enabled = text.isNotBlank()) { Text("Разобрать") }
             }
         }
@@ -741,90 +717,21 @@ fun TransactionListItem(
     transaction: TransactionData,
     category: CategoryData?,
     dateFormatter: SimpleDateFormat,
-    incomeColor: Color = Color(0xFF2E7D32),
-    expenseColor: Color = Color(0xFFC62828),
+    incomeColor: Color = Color(0xFF2E9C6E),
+    expenseColor: Color = Color(0xFFDA5C5C),
     onClick: () -> Unit = {},
-    onDelete: () -> Unit
+    onDelete: () -> Unit = {},
+    showDeleteButton: Boolean = true
 ) {
     val categoryColor = category?.let { parseColorHex(it.colorHex) } ?: Color.Gray
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(categoryColor.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        getCategoryIcon(category?.iconName ?: ""),
-                        contentDescription = null,
-                        tint = categoryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            transaction.description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (transaction.isAutoCategorized) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                Icons.Default.AutoAwesome,
-                                contentDescription = "Auto",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = "${category?.name ?: "Другое"} • ${dateFormatter.format(Date(transaction.date))}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = MoneyFormatter.format(transaction.money, showSign = true, type = transaction.type),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (transaction.type == TransactionType.INCOME) incomeColor else expenseColor
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "Удалить",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-    }
+    TransactionRow(
+        transaction = transaction,
+        category = category,
+        categoryColor = categoryColor,
+        incomeColor = incomeColor,
+        expenseColor = expenseColor,
+        onClick = onClick,
+        onDelete = onDelete,
+        showDeleteButton = showDeleteButton
+    )
 }

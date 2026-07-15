@@ -1,22 +1,37 @@
 package kz.abdiyev.walletai.data.repository
 
+import kz.abdiyev.walletai.BuildConfig
+import kz.abdiyev.walletai.ai.AdviceAiClient
+import kz.abdiyev.walletai.ai.AdviceCachePolicy
+import kz.abdiyev.walletai.ai.AdvicePrompt
+import kz.abdiyev.walletai.ai.AdviceResult
+import kz.abdiyev.walletai.ai.AiErrorMapper
+import kz.abdiyev.walletai.ai.FallbackAdvice
+import kz.abdiyev.walletai.data.database.AppDatabase
 import kz.abdiyev.walletai.data.database.CategoryDao
 import kz.abdiyev.walletai.data.database.MerchantRuleDao
 import kz.abdiyev.walletai.data.database.MerchantRuleEntity
 import kz.abdiyev.walletai.data.database.TransactionDao
 import kz.abdiyev.walletai.data.mapper.toDomain
 import kz.abdiyev.walletai.data.mapper.toEntity
+import kz.abdiyev.walletai.data.preferences.AdviceCacheDataStore
+import kz.abdiyev.walletai.data.preferences.AdviceCacheEntry
 import kz.abdiyev.walletai.data.preferences.SettingsDataStore
 import kz.abdiyev.walletai.domain.model.CategoryData
+import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kz.abdiyev.walletai.domain.repository.AdviceRepository
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
+import kz.abdiyev.walletai.domain.repository.MaintenanceRepository
 import kz.abdiyev.walletai.domain.repository.MerchantRuleRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
 import kz.abdiyev.walletai.domain.repository.TransactionRepository
-import kz.abdiyev.walletai.service.GeminiService
+import kz.abdiyev.walletai.util.Clock
+import kz.abdiyev.walletai.util.MockDataProvider
+import kz.abdiyev.walletai.util.SystemClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import timber.log.Timber
 
 class TransactionRepositoryImpl(
     private val dao: TransactionDao
@@ -61,7 +76,7 @@ class CategoryRepositoryImpl(
         dao.getAllCategoriesList().map { it.toDomain() }
 
     override suspend fun ensureDefaultCategories() {
-        kz.abdiyev.walletai.util.MockDataProvider.seedDefaultCategories(dao)
+        MockDataProvider.seedDefaultCategories(dao)
     }
 
     override suspend fun insert(category: CategoryData): Long =
@@ -85,40 +100,106 @@ class CategoryRepositoryImpl(
 class SettingsRepositoryImpl(
     private val dataStore: SettingsDataStore
 ) : SettingsRepository {
-    override val currencyCode = dataStore.currencyCode
-    override val userName = dataStore.userName
-    override val themeMode = dataStore.themeMode
-    override val onboardingDone = dataStore.onboardingDone
-    override val demoLoaded = dataStore.demoLoaded
-    override val notificationsEnabled = dataStore.notificationsEnabled
-    override val notificationHour = dataStore.notificationHour
-    override val biometricEnabled = dataStore.biometricEnabled
-
-    override suspend fun setCurrency(code: String) { dataStore.setCurrency(code) }
-    override suspend fun setUserName(name: String) { dataStore.setUserName(name) }
-    override suspend fun setThemeMode(mode: String) { dataStore.setThemeMode(mode) }
-    override suspend fun setOnboardingDone(done: Boolean) { dataStore.setOnboardingDone(done) }
-    override suspend fun setDemoLoaded(loaded: Boolean) { dataStore.setDemoLoaded(loaded) }
-    override suspend fun setNotificationsEnabled(enabled: Boolean) { dataStore.setNotificationsEnabled(enabled) }
-    override suspend fun setNotificationHour(hour: Int) { dataStore.setNotificationHour(hour) }
-    override suspend fun setBiometricEnabled(enabled: Boolean) { dataStore.setBiometricEnabled(enabled) }
+    override val settings = dataStore.settings
+    override suspend fun update(transform: (Settings) -> Settings) = dataStore.update(transform)
 }
 
 class AdviceRepositoryImpl(
-    private val geminiService: GeminiService
+    private val aiClient: AdviceAiClient,
+    private val adviceCacheDataStore: AdviceCacheDataStore,
+    private val clock: Clock = SystemClock
 ) : AdviceRepository {
+    private var memoryCache: AdviceCacheEntry? = null
+
     override suspend fun generateAdvice(
         transactions: List<TransactionData>,
         categories: List<CategoryData>,
-        currencyCode: String
-    ): String = geminiService.generateFinancialAdvice(transactions, categories, currencyCode)
+        currencyCode: String,
+        forceRefresh: Boolean
+    ): AdviceResult {
+        val prompt = AdvicePrompt.build(transactions, categories, currencyCode)
+        val promptHash = AdviceCachePolicy.promptHash(prompt)
+        val nowMillis = clock.nowMillis()
 
-    override fun getFallbackAdvice(
+        memoryCache?.let { cached ->
+            if (AdviceCachePolicy.isValid(
+                    cachedPromptHash = cached.promptHash,
+                    cachedTimestampMillis = cached.timestampMillis,
+                    currentPromptHash = promptHash,
+                    nowMillis = nowMillis,
+                    forceRefresh = forceRefresh
+                )
+            ) {
+                return AdviceResult.Ai(
+                    text = cached.adviceText,
+                    fromCache = true,
+                    cachedAtMillis = cached.timestampMillis
+                )
+            }
+        }
+
+        if (!forceRefresh) {
+            val stored = adviceCacheDataStore.get()
+            if (stored != null && AdviceCachePolicy.isValid(
+                    cachedPromptHash = stored.promptHash,
+                    cachedTimestampMillis = stored.timestampMillis,
+                    currentPromptHash = promptHash,
+                    nowMillis = nowMillis,
+                    forceRefresh = false
+                )
+            ) {
+                memoryCache = stored
+                return AdviceResult.Ai(
+                    text = stored.adviceText,
+                    fromCache = true,
+                    cachedAtMillis = stored.timestampMillis
+                )
+            }
+        }
+
+        return try {
+            val text = aiClient.generateAdvice(prompt)
+            val entry = AdviceCacheEntry(
+                adviceText = text,
+                promptHash = promptHash,
+                timestampMillis = nowMillis
+            )
+            memoryCache = entry
+            adviceCacheDataStore.save(entry)
+            AdviceResult.Ai(text)
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) {
+                Timber.e(e, "AI advice call failed")
+            }
+            val reason = AiErrorMapper.userMessage(e)
+            AdviceResult.Fallback(
+                text = FallbackAdvice.build(transactions, categories, currencyCode, reason),
+                reason = reason
+            )
+        }
+    }
+
+    override fun localAdvice(
         transactions: List<TransactionData>,
         categories: List<CategoryData>,
         currencyCode: String,
         reason: String
-    ): String = geminiService.getFallbackAdvice(transactions, categories, currencyCode, reason)
+    ): AdviceResult.Fallback = AdviceResult.Fallback(
+        text = FallbackAdvice.build(transactions, categories, currencyCode, reason),
+        reason = reason
+    )
+}
+
+class MaintenanceRepositoryImpl(
+    private val db: AppDatabase
+) : MaintenanceRepository {
+    override suspend fun loadDemoData() {
+        MockDataProvider.loadDemoTransactions(db.categoryDao(), db.transactionDao())
+    }
+
+    override suspend fun wipeAllData() {
+        db.transactionDao().deleteAllTransactions()
+    }
 }
 
 class MerchantRuleRepositoryImpl(

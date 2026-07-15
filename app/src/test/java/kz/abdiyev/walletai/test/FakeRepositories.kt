@@ -1,7 +1,9 @@
 package kz.abdiyev.walletai.test
 
 import kz.abdiyev.walletai.domain.model.CategoryData
+import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.model.TransactionData
+import kz.abdiyev.walletai.domain.repository.AdviceRepository
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.MerchantRuleRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
@@ -81,35 +83,36 @@ class FakeCategoryRepository(
 }
 
 class FakeSettingsRepository : SettingsRepository {
-    private val _currency = MutableStateFlow("KZT")
-    private val _userName = MutableStateFlow("")
-    private val _theme = MutableStateFlow("system")
-    private val _onboarding = MutableStateFlow(true)
-    private val _demoLoaded = MutableStateFlow(false)
-    private val _notifications = MutableStateFlow(false)
-    private val _notificationHour = MutableStateFlow(21)
-    private val _biometric = MutableStateFlow(false)
+    private val _settings = MutableStateFlow(Settings(onboardingDone = true))
 
-    override val currencyCode: Flow<String> = _currency
-    override val userName: Flow<String> = _userName
-    override val themeMode: Flow<String> = _theme
-    override val onboardingDone: Flow<Boolean> = _onboarding
-    override val demoLoaded: Flow<Boolean> = _demoLoaded
-    override val notificationsEnabled: Flow<Boolean> = _notifications
-    override val notificationHour: Flow<Int> = _notificationHour
-    override val biometricEnabled: Flow<Boolean> = _biometric
+    override val settings: Flow<Settings> = _settings
 
-    override suspend fun setCurrency(code: String) { _currency.value = code }
-    override suspend fun setUserName(name: String) { _userName.value = name }
-    override suspend fun setThemeMode(mode: String) { _theme.value = mode }
-    override suspend fun setOnboardingDone(done: Boolean) { _onboarding.value = done }
-    override suspend fun setDemoLoaded(loaded: Boolean) { _demoLoaded.value = loaded }
-    override suspend fun setNotificationsEnabled(enabled: Boolean) { _notifications.value = enabled }
-    override suspend fun setNotificationHour(hour: Int) { _notificationHour.value = hour }
-    override suspend fun setBiometricEnabled(enabled: Boolean) { _biometric.value = enabled }
+    override suspend fun update(transform: (Settings) -> Settings) {
+        _settings.value = transform(_settings.value)
+    }
 }
 
 class FakeMerchantRuleRepository : MerchantRuleRepository {
     override suspend fun findCategoryId(description: String): Long? = null
     override suspend fun saveRule(merchantPattern: String, categoryId: Long) = Unit
+}
+
+class FakeAdviceRepository(
+    private val generateResult: kz.abdiyev.walletai.ai.AdviceResult = kz.abdiyev.walletai.ai.AdviceResult.Ai("AI advice"),
+    private val fallbackReason: String = "offline"
+) : AdviceRepository {
+    override suspend fun generateAdvice(
+        transactions: List<TransactionData>,
+        categories: List<CategoryData>,
+        currencyCode: String,
+        forceRefresh: Boolean
+    ): kz.abdiyev.walletai.ai.AdviceResult = generateResult
+
+    override fun localAdvice(
+        transactions: List<TransactionData>,
+        categories: List<CategoryData>,
+        currencyCode: String,
+        reason: String
+    ): kz.abdiyev.walletai.ai.AdviceResult.Fallback =
+        kz.abdiyev.walletai.ai.AdviceResult.Fallback("Local report", fallbackReason)
 }

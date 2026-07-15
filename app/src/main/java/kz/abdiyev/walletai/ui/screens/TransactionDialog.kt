@@ -9,10 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,7 +39,11 @@ import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.ui.components.PrimaryCta
+import kz.abdiyev.walletai.ui.components.SegmentedToggle
 import kz.abdiyev.walletai.ui.components.getCategoryIcon
+import kz.abdiyev.walletai.ui.theme.PillShape
+import kz.abdiyev.walletai.ui.theme.SmallShape
 import kz.abdiyev.walletai.ui.theme.WalletAiTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -85,60 +86,22 @@ fun TransactionDialog(
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
         title = { Text(if (isEdit) "Редактировать операцию" else "Новая операция") },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Button(
-                        onClick = {
-                            type = TransactionType.EXPENSE
-                            selectedCategoryId = categories.firstOrNull { it.type == TransactionType.EXPENSE }?.id
-                                ?: selectedCategoryId
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (type == TransactionType.EXPENSE) {
-                                financialColors.expense
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            contentColor = if (type == TransactionType.EXPENSE) {
-                                Color.White
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        ),
-                        shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)
-                    ) {
-                        Text("Расход")
+                SegmentedToggle(
+                    options = listOf("Расход", "Доход"),
+                    selectedIndex = if (type == TransactionType.EXPENSE) 0 else 1,
+                    onSelect = { index ->
+                        type = if (index == 0) TransactionType.EXPENSE else TransactionType.INCOME
+                        selectedCategoryId = categories.firstOrNull { it.type == type }?.id
+                            ?: selectedCategoryId
                     }
-                    Button(
-                        onClick = {
-                            type = TransactionType.INCOME
-                            selectedCategoryId = categories.firstOrNull { it.type == TransactionType.INCOME }?.id
-                                ?: selectedCategoryId
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (type == TransactionType.INCOME) {
-                                financialColors.income
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            contentColor = if (type == TransactionType.INCOME) {
-                                Color.White
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        ),
-                        shape = RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)
-                    ) {
-                        Text("Доход")
-                    }
-                }
+                )
 
                 val amountInvalid = amountStr.isNotBlank() && Money.fromMajorString(amountStr, currency) == null
                 OutlinedTextField(
@@ -154,7 +117,8 @@ fun TransactionDialog(
                         if (amountInvalid) {
                             Text("Введите сумму больше нуля, например 3400 или 3400,50")
                         }
-                    }
+                    },
+                    shape = SmallShape
                 )
 
                 OutlinedTextField(
@@ -163,12 +127,14 @@ fun TransactionDialog(
                     label = { Text("Описание (необязательно)") },
                     placeholder = { Text("Например: Magnum, зарплата") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    shape = SmallShape
                 )
 
                 OutlinedButton(
                     onClick = { showDatePicker = true },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = PillShape
                 ) {
                     Text("Дата: ${dateFormatter.format(Date(selectedDate))}")
                 }
@@ -212,20 +178,17 @@ fun TransactionDialog(
         },
         confirmButton = {
             val parsedMoney = Money.fromMajorString(amountStr, currency)
-            Button(
+            PrimaryCta(
+                text = if (isEdit) "Сохранить" else "Добавить",
                 onClick = {
-                    val money = parsedMoney ?: return@Button
-                    // Empty description falls back to the category name for faster entry
+                    val money = parsedMoney ?: return@PrimaryCta
                     val description = descStr.trim().ifBlank {
                         categories.firstOrNull { it.id == selectedCategoryId }?.name ?: "Операция"
                     }
                     onConfirm(money, type, selectedCategoryId, description, selectedDate)
                 },
-                enabled = parsedMoney != null && selectedCategoryId != 0L,
-                modifier = Modifier.height(48.dp)
-            ) {
-                Text(if (isEdit) "Сохранить" else "Добавить")
-            }
+                enabled = parsedMoney != null && selectedCategoryId != 0L
+            )
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {

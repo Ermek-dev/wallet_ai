@@ -1,29 +1,22 @@
 package kz.abdiyev.walletai.util
 
 import kz.abdiyev.walletai.data.database.CategoryDao
-import kz.abdiyev.walletai.data.database.CategoryEntity
 import kz.abdiyev.walletai.data.database.TransactionDao
 import kz.abdiyev.walletai.data.database.TransactionEntity
+import kz.abdiyev.walletai.data.seed.DefaultCategories
 import kz.abdiyev.walletai.domain.model.Currency
 import java.util.Calendar
 
 object MockDataProvider {
 
-    val defaultCategories = listOf(
-        CategoryEntity(name = "Продукты", type = "EXPENSE", colorHex = "#EF5350", iconName = "shopping_cart"),
-        CategoryEntity(name = "ЖКХ", type = "EXPENSE", colorHex = "#42A5F5", iconName = "home"),
-        CategoryEntity(name = "Кофе и Рестораны", type = "EXPENSE", colorHex = "#FFA726", iconName = "restaurant"),
-        CategoryEntity(name = "Транспорт", type = "EXPENSE", colorHex = "#26A69A", iconName = "commute"),
-        CategoryEntity(name = "Развлечения", type = "EXPENSE", colorHex = "#AB47BC", iconName = "movie"),
-        CategoryEntity(name = "Здоровье", type = "EXPENSE", colorHex = "#66BB6A", iconName = "healing"),
-        CategoryEntity(name = "Подписки", type = "EXPENSE", colorHex = "#78909C", iconName = "subscriptions"),
-        CategoryEntity(name = "Зарплата", type = "INCOME", colorHex = "#9CCC65", iconName = "payments"),
-        CategoryEntity(name = "Другое", type = "EXPENSE", colorHex = "#757575", iconName = "paid", isSystem = true)
-    )
+    val defaultCategories = DefaultCategories.entities
 
     suspend fun seedDefaultCategories(categoryDao: CategoryDao) {
-        if (categoryDao.getAllCategoriesList().isNotEmpty()) return
-        categoryDao.insertCategories(defaultCategories)
+        val existingNames = categoryDao.getAllCategoriesList().map { it.name }.toSet()
+        val missing = defaultCategories.filter { it.name !in existingNames }
+        if (missing.isNotEmpty()) {
+            categoryDao.insertCategories(missing)
+        }
     }
 
     suspend fun loadDemoTransactions(categoryDao: CategoryDao, transactionDao: TransactionDao) {

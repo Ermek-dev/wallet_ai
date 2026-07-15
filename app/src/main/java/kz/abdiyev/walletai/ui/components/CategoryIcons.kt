@@ -13,11 +13,12 @@ fun getCategoryIcon(iconName: String): ImageVector = when (iconName) {
     "healing" -> Icons.Default.MedicalServices
     "payments" -> Icons.Default.Payments
     "subscriptions" -> Icons.Default.Star
+    "swap_horiz" -> Icons.Default.SwapHoriz
     else -> Icons.Default.Paid
 }
 
 val categoryIconOptions = listOf(
-    "shopping_cart", "home", "restaurant", "commute", "movie", "healing", "payments", "subscriptions", "paid"
+    "shopping_cart", "home", "restaurant", "commute", "movie", "healing", "payments", "subscriptions", "swap_horiz", "paid"
 )
 
 val categoryColorOptions = listOf(

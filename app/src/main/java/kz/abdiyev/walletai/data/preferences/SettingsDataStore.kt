@@ -8,9 +8,10 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kz.abdiyev.walletai.domain.model.Settings
+import kz.abdiyev.walletai.domain.model.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kz.abdiyev.walletai.domain.model.Currency
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "walletai_settings")
 
@@ -23,24 +24,47 @@ class SettingsDataStore(private val context: Context) {
         val DEMO_LOADED = booleanPreferencesKey("demo_loaded")
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val NOTIFICATION_HOUR = intPreferencesKey("notification_hour")
+        val NOTIFICATION_MINUTE = intPreferencesKey("notification_minute")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
     }
 
-    val currencyCode: Flow<String> = context.dataStore.data.map { it[Keys.CURRENCY] ?: Currency.KZT.code }
-    val userName: Flow<String> = context.dataStore.data.map { it[Keys.USER_NAME] ?: "" }
-    val themeMode: Flow<String> = context.dataStore.data.map { it[Keys.THEME_MODE] ?: "system" }
-    val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_DONE] ?: false }
-    val demoLoaded: Flow<Boolean> = context.dataStore.data.map { it[Keys.DEMO_LOADED] ?: false }
-    val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.NOTIFICATIONS_ENABLED] ?: false }
-    val notificationHour: Flow<Int> = context.dataStore.data.map { it[Keys.NOTIFICATION_HOUR] ?: 21 }
-    val biometricEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.BIOMETRIC_ENABLED] ?: false }
+    val settings: Flow<Settings> = context.dataStore.data.map { prefs ->
+        Settings(
+            currencyCode = prefs[Keys.CURRENCY] ?: Settings().currencyCode,
+            userName = prefs[Keys.USER_NAME] ?: "",
+            themeMode = ThemeMode.fromStorageValue(prefs[Keys.THEME_MODE] ?: ThemeMode.SYSTEM.toStorageValue()),
+            onboardingDone = prefs[Keys.ONBOARDING_DONE] ?: false,
+            demoLoaded = prefs[Keys.DEMO_LOADED] ?: false,
+            notificationsEnabled = prefs[Keys.NOTIFICATIONS_ENABLED] ?: false,
+            notificationHour = prefs[Keys.NOTIFICATION_HOUR] ?: 21,
+            notificationMinute = prefs[Keys.NOTIFICATION_MINUTE] ?: 0,
+            biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false
+        )
+    }
 
-    suspend fun setCurrency(code: String) = context.dataStore.edit { it[Keys.CURRENCY] = code }
-    suspend fun setUserName(name: String) = context.dataStore.edit { it[Keys.USER_NAME] = name }
-    suspend fun setThemeMode(mode: String) = context.dataStore.edit { it[Keys.THEME_MODE] = mode }
-    suspend fun setOnboardingDone(done: Boolean) = context.dataStore.edit { it[Keys.ONBOARDING_DONE] = done }
-    suspend fun setDemoLoaded(loaded: Boolean) = context.dataStore.edit { it[Keys.DEMO_LOADED] = loaded }
-    suspend fun setNotificationsEnabled(enabled: Boolean) = context.dataStore.edit { it[Keys.NOTIFICATIONS_ENABLED] = enabled }
-    suspend fun setNotificationHour(hour: Int) = context.dataStore.edit { it[Keys.NOTIFICATION_HOUR] = hour }
-    suspend fun setBiometricEnabled(enabled: Boolean) = context.dataStore.edit { it[Keys.BIOMETRIC_ENABLED] = enabled }
+    suspend fun update(transform: (Settings) -> Settings) {
+        context.dataStore.edit { prefs ->
+            val current = Settings(
+                currencyCode = prefs[Keys.CURRENCY] ?: Settings().currencyCode,
+                userName = prefs[Keys.USER_NAME] ?: "",
+                themeMode = ThemeMode.fromStorageValue(prefs[Keys.THEME_MODE] ?: ThemeMode.SYSTEM.toStorageValue()),
+                onboardingDone = prefs[Keys.ONBOARDING_DONE] ?: false,
+                demoLoaded = prefs[Keys.DEMO_LOADED] ?: false,
+                notificationsEnabled = prefs[Keys.NOTIFICATIONS_ENABLED] ?: false,
+                notificationHour = prefs[Keys.NOTIFICATION_HOUR] ?: 21,
+                notificationMinute = prefs[Keys.NOTIFICATION_MINUTE] ?: 0,
+                biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false
+            )
+            val updated = transform(current)
+            prefs[Keys.CURRENCY] = updated.currencyCode
+            prefs[Keys.USER_NAME] = updated.userName
+            prefs[Keys.THEME_MODE] = updated.themeMode.toStorageValue()
+            prefs[Keys.ONBOARDING_DONE] = updated.onboardingDone
+            prefs[Keys.DEMO_LOADED] = updated.demoLoaded
+            prefs[Keys.NOTIFICATIONS_ENABLED] = updated.notificationsEnabled
+            prefs[Keys.NOTIFICATION_HOUR] = updated.notificationHour
+            prefs[Keys.NOTIFICATION_MINUTE] = updated.notificationMinute
+            prefs[Keys.BIOMETRIC_ENABLED] = updated.biometricEnabled
+        }
+    }
 }

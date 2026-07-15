@@ -2,87 +2,76 @@ package kz.abdiyev.walletai.ml
 
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Currency
-import kz.abdiyev.walletai.domain.model.Money
-import kz.abdiyev.walletai.domain.model.TransactionData
-import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.ml.statement.FreedomStatementParser
+import kz.abdiyev.walletai.ml.statement.GenericStatementParser
+import kz.abdiyev.walletai.ml.statement.KaspiStatementParser
+import kz.abdiyev.walletai.ml.statement.StatementCategorizer
+import kz.abdiyev.walletai.ml.statement.StatementFormat
+import kz.abdiyev.walletai.ml.statement.StatementFormatDetector
+import kz.abdiyev.walletai.ml.statement.StatementParseContext
 
 data class ParsedStatementLine(
     val id: Long,
-    val money: Money,
-    val type: TransactionType,
+    val money: kz.abdiyev.walletai.domain.model.Money,
+    val type: kz.abdiyev.walletai.domain.model.TransactionType,
     val description: String,
     val predictedCategoryId: Long,
-    val date: Long
+    val date: Long,
+    val rawOperation: String = "",
+    val isTransfer: Boolean = false
+)
+
+data class BankStatementParseResult(
+    val format: StatementFormat,
+    val lines: List<ParsedStatementLine>
 )
 
 class BankStatementParser(
-    private val classifier: TransactionClassifier = TransactionClassifier()
+    private val classifier: TransactionClassifier = TransactionClassifier(),
+    private val detector: StatementFormatDetector = StatementFormatDetector(),
+    private val kaspiParser: KaspiStatementParser = KaspiStatementParser(),
+    private val freedomParser: FreedomStatementParser = FreedomStatementParser(),
+    private val genericParser: GenericStatementParser = GenericStatementParser(),
+    private val categorizer: StatementCategorizer = StatementCategorizer(classifier)
 ) {
-    private val amountRegex = Regex(
-        "(?<=^|\\s|[^0-9])([0-9]+[.,]?[0-9]{0,2})(?=\\s|р|руб|руб\\.|usd|eur|тг|тенге|₸|tg|kzt|\\s*\$|[^0-9])",
-        RegexOption.IGNORE_CASE
-    )
-
     fun parse(
         text: String,
         categories: List<CategoryData>,
         trainedModel: TransactionClassifier.TrainedModel?,
         defaultCurrency: Currency = Currency.KZT,
         defaultDate: Long = System.currentTimeMillis()
-    ): List<ParsedStatementLine> {
-        if (text.isBlank() || categories.isEmpty()) return emptyList()
+    ): BankStatementParseResult {
+        if (text.isBlank() || categories.isEmpty()) {
+            return BankStatementParseResult(StatementFormat.GENERIC, emptyList())
+        }
 
-        val previewList = mutableListOf<ParsedStatementLine>()
-        var tempIdCounter = 1L
+        val format = detector.detect(text)
+        val ctx = StatementParseContext(defaultCurrency = defaultCurrency, defaultDate = defaultDate)
+        val rawLines = when (format) {
+            StatementFormat.KASPI -> kaspiParser.parse(text, ctx)
+            StatementFormat.FREEDOM -> freedomParser.parse(text, ctx)
+            StatementFormat.GENERIC -> genericParser.parse(text, ctx)
+        }
 
-        for (line in text.split("\n")) {
-            val cleanLine = line.trim()
-            if (cleanLine.isBlank()) continue
-
-            val amountMatch = amountRegex.findAll(cleanLine).lastOrNull()
-            var majorAmount = 0.0
-            if (amountMatch != null) {
-                majorAmount = amountMatch.value.replace(",", ".").toDoubleOrNull() ?: 0.0
-            }
-            if (majorAmount == 0.0) {
-                val simpleDigits = Regex("\\d+").find(cleanLine)
-                majorAmount = simpleDigits?.value?.toDoubleOrNull() ?: 0.0
-            }
-            if (majorAmount == 0.0) continue
-
-            var description = cleanLine
-                .replace(amountMatch?.value ?: "", "")
-                .replace(Regex("(?i)(руб|руб\\.|р\\.|р|usd|eur|тг|тенге|₸|tg|kzt|\\+|-|=)"), "")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-            if (description.isBlank()) description = "Транзакция по выписке"
-
-            val isIncome = cleanLine.contains("+") ||
-                cleanLine.lowercase().contains("зарплата") ||
-                cleanLine.lowercase().contains("зачисление") ||
-                cleanLine.lowercase().contains("аванс") ||
-                cleanLine.lowercase().contains("пополнение") ||
-                cleanLine.lowercase().contains("postupil") ||
-                cleanLine.lowercase().contains("kaspi red")
-
-            val type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE
-            val predictedCatId = if (trainedModel != null) {
-                classifier.classify(description, trainedModel, categories)
-            } else {
-                categories.first().id
-            }
-
-            previewList.add(
-                ParsedStatementLine(
-                    id = tempIdCounter++,
-                    money = Money.fromMajor(majorAmount, defaultCurrency),
-                    type = type,
-                    description = description,
-                    predictedCategoryId = predictedCatId,
-                    date = defaultDate
-                )
+        val transfersCategoryId = categories.find { it.name == "Переводы" }?.id
+        var tempId = 1L
+        val lines = rawLines.map { raw ->
+            ParsedStatementLine(
+                id = tempId++,
+                money = raw.money,
+                type = raw.type,
+                description = raw.description,
+                predictedCategoryId = categorizer.categoryIdFor(
+                    raw = raw,
+                    categories = categories,
+                    trainedModel = trainedModel,
+                    transfersCategoryId = transfersCategoryId
+                ),
+                date = raw.date,
+                rawOperation = raw.rawOperation,
+                isTransfer = raw.isTransfer
             )
         }
-        return previewList
+        return BankStatementParseResult(format, lines)
     }
 }

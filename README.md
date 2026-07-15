@@ -1,21 +1,92 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# WalletAI
 
-# Run and deploy your AI Studio app
+![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-4285F4?logo=jetpackcompose&logoColor=white)
+![KMP](https://img.shields.io/badge/Kotlin%20Multiplatform-blueviolet)
 
-This contains everything you need to run your app locally.
+Личное Android-приложение учёта доходов и расходов: Kotlin, Jetpack Compose, Room, KMP-модуль `shared/`, Groq API (советник) с кэшем и fallback на Gemini.
 
-View your app in AI Studio: https://ai.studio/apps/56e782c9-f4ef-47e2-ab9e-ae3e99284df2
+## Скриншоты
 
-## Run Locally
+### Учёт и операции
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/dashboard.png" width="220"/><br/>Главный экран</td>
+    <td align="center"><img src="docs/screenshots/edit.png" width="220"/><br/>Добавление операции</td>
+    <td align="center"><img src="docs/screenshots/import.png" width="220"/><br/>Импорт выписки</td>
+  </tr>
+</table>
 
+### Аналитика
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/analytics-expense.png" width="220"/><br/>Расходы</td>
+    <td align="center"><img src="docs/screenshots/analytics-income.png" width="220"/><br/>Доходы</td>
+  </tr>
+</table>
+
+### ИИ-советник и профиль
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/advisor.png" width="220"/><br/>ИИ-советник</td>
+    <td align="center"><img src="docs/screenshots/profile.png" width="220"/><br/>Профиль и настройки</td>
+  </tr>
+</table>
+
+<!-- Когда доснимешь тёмную тему:
+### Светлая и тёмная тема
+<table><tr>
+  <td align="center"><img src="docs/screenshots/dashboard-light.png" width="220"/><br/>Светлая</td>
+  <td align="center"><img src="docs/screenshots/dashboard-dark.png" width="220"/><br/>Тёмная</td>
+</tr></table>
+-->
+
+## Возможности
+
+- Учёт операций, категории, undo удаления, семантика доход/расход
+- Голосовой ввод (системный SpeechRecognizer) и импорт выписки (текст / PDF)
+- Аналитика: донат-диаграмма, рейтинг категорий, календарные периоды, экспорт CSV/PDF
+- ИИ-советник (Groq) с кэшем 24 ч и офлайн-fallback
+- Профиль: валюта, тема, настраиваемое вечернее напоминание (WorkManager)
+
+## Требования
+
+- Android Studio (Koala+)
+- JDK 11+
+- Файл `.env` в корне проекта (см. `.env.example`)
+
+```env
+GROQ_API_KEY=ваш_ключ_groq
+GEMINI_API_KEY=опционально_для_fallback
+```
+
+## Сборка и тесты
+
+```bash
+./gradlew :app:assembleDebug
+./gradlew :shared:testAndroidHostTest :app:testDebugUnitTest
+./gradlew :app:installDebug
+```
+
+APK: `app/build/outputs/apk/debug/app-debug.apk`
+
+## Структура
+
+```
+app/       — Android UI, Room, DI (Koin), WorkManager, PDFBox
+shared/    — KMP: domain, ML, AI (Ktor/Groq), unit-тесты
+docs/      — ARCHITECTURE.md, PLAN.md
+```
+
+## Документация
+
+- [PLAN.md](PLAN.md) — дорожная карта
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — слои и потоки данных
+- [AGENTS.md](AGENTS.md) — соглашения для разработки
+
+## Gitflow
+
+Ветка `develop` → feature-ветки → PR. Push и remote — вручную владельцем репозитория.

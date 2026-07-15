@@ -6,7 +6,8 @@
 
 WalletAI — офлайн-first приложение учёта личных финансов с локальным ML и ИИ-советником.
 Единственный источник правды — локальная БД **Room (SQLite на устройстве)**. Сервера и аккаунта нет;
-сеть используется только для запроса советов к Gemini API (уходит агрегированная сводка, не сырые данные).
+сеть используется для запроса советов к **Groq API** (основной провайдер) и опционально Gemini (fallback).
+На сервер уходит агрегированная сводка, не сырые транзакции.
 
 ## Модули
 
@@ -14,7 +15,7 @@ WalletAI — офлайн-first приложение учёта личных ф�
 walletai/
 ├── app/        Android-приложение (Compose UI, ViewModels, Room, Koin, сервисы)
 └── shared/     Kotlin Multiplatform: чистая бизнес-логика без Android-классов
-    ├── commonMain/   domain-модели, ML, утилиты  ← сюда кладём всю новую логику
+    ├── commonMain/   domain-модели, ML, AI, утилиты  ← сюда кладём всю новую логику
     ├── commonTest/   unit-тесты общей логики
     └── iosMain/      задел под iOS (пока placeholder)
 ```
@@ -26,56 +27,62 @@ UI (Compose-экраны)  ──собирает StateFlow──  ViewModel (п
         │                                          │ через интерфейсы
         │                                          ▼
         │                              domain/repository (интерфейсы)
-        │                                          │ Koin DI (di/AppModule.kt)
+        │                                          │ Koin DI (di/*Module.kt)
         │                                          ▼
         │                              data/repository (реализации)
         │                               │        │         │
         │                               ▼        ▼         ▼
-        │                             Room   DataStore   GeminiService (OkHttp)
+        │                             Room   DataStore   AdviceAiClient (Ktor)
         └── события пользователя ──────────────────────────────────────►
 ```
 
-- **UI** (`ui/screens`, `ui/components`): 4 экрана — Dashboard (учёт), Analytics, Advisor (ИИ), Profile. Навигация — табы в `MainActivity`.
-- **ViewModel** (`ui/viewmodel`): `DashboardViewModel`, `AnalyticsViewModel`, `AdvisorViewModel`, `ProfileViewModel`. Наружу — только `StateFlow`; внутрь — только интерфейсы репозиториев.
-- **domain/repository** (интерфейсы): `TransactionRepository`, `CategoryRepository`, `SettingsRepository`, `AdviceRepository`, `MerchantRuleRepository`.
-- **data**: `database/` (Room: Entities, Daos, `DatabaseMigrations`), `preferences/SettingsDataStore` (валюта, имя, настройки), `repository/` (реализации), `mapper/EntityMappers` (Entity ↔ domain-модель).
-- **DI**: Koin, единый модуль `di/AppModule.kt`, старт в `WalletAiApplication`.
+- **UI** (`ui/screens`, `ui/components`): основные табы — Учёт (Dashboard), Аналитика, ИИ (Advisor), Профиль; отдельные маршруты — История, Импорт (`WalletAiRoutes` + Navigation Compose в `MainActivity`).
+- **ViewModel** (`ui/viewmodel`): `DashboardViewModel`, `AnalyticsViewModel` (`AnalyticsUiState`), `AdvisorViewModel`, `ProfileViewModel`, `ImportViewModel` (`ImportUiState`), `HistoryViewModel`. Наружу — `StateFlow`; внутрь — интерфейсы репозиториев.
+- **domain/repository** (интерфейсы): `TransactionRepository`, `CategoryRepository`, `SettingsRepository`, `AdviceRepository`, `MerchantRuleRepository`, `MaintenanceRepository`.
+- **data**: `database/` (Room), `preferences/SettingsDataStore` + `AdviceCacheDataStore`, `repository/`, `mapper/EntityMappers`.
+- **DI**: Koin — модульная сборка `databaseModule`, `repositoryModule`, `aiModule`, `viewModelModule`; старт в `WalletAiApplication` + `ReminderBootstrap` при запуске.
 
 ## Общая логика (shared/commonMain)
 
 | Пакет | Содержимое |
 |---|---|
-| `domain/model` | `Money` (Long, минорные единицы), `Currency`, `TransactionType`, `Period`, `TransactionData`, `CategoryData` |
-| `ml` | `TransactionClassifier` (Naive Bayes), `BankStatementParser`, `VoiceInputParser` |
-| `util` | `MoneyFormatter`, `PeriodFilter` |
+| `domain/model` | `Money`, `Currency`, `TransactionType`, `Period`, `Settings`, `TransactionData`, `CategoryData` |
+| `ml` | `TransactionClassifier`, `BankStatementParser`, `VoiceInputParser`, парсеры Kaspi/Freedom |
+| `ai` | `AdviceAiClient`, `GroqClient`, `AiErrorMapper`, `AdviceCachePolicy` |
+| `util` | `MoneyFormatter`, `PeriodFilter`, `CalendarMillis`, `DescriptionNormalizer`, `ReminderDelayCalculator` |
 
-Правило: код здесь не знает про Android (`Context`, `Log`, `android.*` запрещены) — это гарантия переносимости на iOS.
+Правило: код здесь не знает про Android (`Context`, `Log`, `android.*` запрещены).
 
 ## Ключевые потоки
 
-**Добавление транзакции (вручную):** DashboardScreen → диалог `TransactionDialog` → `DashboardViewModel.addTransaction` → `TransactionRepository` → Room DAO → Flow автоматически обновляет список на экране.
+**Учёт и периоды:** `PeriodFilter` + `CalendarMillis` (календарная неделя/месяц/3 месяца) → `DashboardUiState.filteredTransactions`; на главном экране превью последних 7 операций.
 
-**Голосовой ввод:** микрофон → `VoiceRecognizerHelper` (системный SpeechRecognizer, on-device) → текст → `VoiceInputParser` (сумма/тип/описание) → `MerchantRuleRepository` (точные правила «мерчант → категория» от исправлений пользователя) → если правила нет — `TransactionClassifier` → предпросмотр → подтверждение → Room.
+**Аналитика:** `AnalyticsViewModel` агрегирует `AnalyticsUiState` (донат, top-8 категорий + «Прочее»); экспорт CSV/PDF — только за выбранный период.
 
-**ИИ-совет:** AdvisorScreen → `AdvisorViewModel` → `AdviceRepository` → `GeminiService` (агрегированная сводка → Gemini API) → при ошибке/нет ключа — локальный fallback-отчёт.
+**Голосовой ввод:** микрофон → `VoiceRecognizerHelper` (системный SpeechRecognizer; **может использовать облако Google** — disclosure в UI) → `VoiceInputParser` → merchant rules → классификатор → предпросмотр → Room. При нулевой сумме — событие и ручное редактирование.
 
-**Экспорт:** `Exporter` (CSV с BOM / PDF через Canvas) → файл в app-specific storage → `ShareHelper` (FileProvider + Share Intent).
+**Импорт выписки:** SAF/PDFBox (`PdfTextExtractor`, off-main) → `BankStatementParser` → `ImportUiState` (Idle/Parsing/Preview/Saving/Error) → предпросмотр с редактированием → дедупликация через `DescriptionNormalizer` → Room.
 
-**Уведомления:** `ReminderScheduler` + `ReminderWorker` (WorkManager) — локальные напоминания, без push-серверов.
+**ИИ-совет:** AdvisorScreen → `AdvisorViewModel` → `AdviceRepository` → `GroqClient` (Ktor) → кэш memory + DataStore (`AdviceCachePolicy`, TTL 24 ч) → при ошибке — локальный fallback.
+
+**Экспорт:** `Exporter` → `ShareHelper` (FileProvider).
+
+**Уведомления:** `ReminderScheduler` + `ReminderWorker` (WorkManager, приблизительное время без exact alarm); `notificationHour` + `notificationMinute` в Settings; перепланирование при старте (`ReminderBootstrap`).
 
 ## Данные
 
-- БД: Room, миграции — только через `DatabaseMigrations.kt` (destructive-миграции запрещены).
-- Деньги: `Long` в минорных единицах (тиын/копейки) внутри `Money`; форматирование — `MoneyFormatter`.
-- Настройки: Jetpack DataStore (валюта по умолчанию KZT ₸ и др.).
-- Секреты: `GEMINI_API_KEY` из `.env` через Secrets Gradle Plugin → `BuildConfig`; `.env` вне git.
+- БД: Room, миграции — только через `DatabaseMigrations.kt`.
+- Деньги: `Long` в минорных единицах внутри `Money`.
+- Настройки: DataStore (`Settings`, `notificationMinute` — новые ключи с defaults, Room-миграция не нужна).
+- Секреты: `GROQ_API_KEY` / `GEMINI_API_KEY` из `.env` → `BuildConfig`; `.env` вне git.
 
 ## Решения и их причины (ADR-кратко)
 
 | Решение | Почему |
 |---|---|
-| Room, а не Supabase/сервер | Финансы — приватные данные; офлайн-first быстрее и безопаснее; нет затрат на инфраструктуру. Supabase — опция для будущей синхронизации (PLAN.md, Фаза 9), не замена локальной БД. |
-| Koin, а не Hilt | Проще для входа, работает в KMP (iOS). |
-| Naive Bayes свой, а не TFLite | Крошечный, обучается на устройстве на данных пользователя, ноль зависимостей, переносим в commonMain. |
-| SpeechRecognizer, а не облачный STT | Бесплатно, on-device, аудио не покидает устройство. |
-| Compose Multiplatform как путь на iOS | UI уже на Compose — перенос дешевле, чем переписывание на SwiftUI. |
+| Room, а не Supabase/сервер | Финансы — приватные данные; офлайн-first. |
+| Koin | KMP-совместимый DI. |
+| Naive Bayes свой | Обучается на устройстве, ноль тяжёлых ML-зависимостей. |
+| Groq + кэш | Стабильнее квоты, чем прямой Gemini при разработке. |
+| WorkManager для напоминаний | Без `SCHEDULE_EXACT_ALARM`; Android может доставить чуть позже. |
+| SpeechRecognizer | Бесплатно из коробки; пользователю показываем, что возможна облачная обработка Google. |

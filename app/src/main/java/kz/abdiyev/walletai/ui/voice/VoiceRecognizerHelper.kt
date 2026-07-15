@@ -23,51 +23,59 @@ class VoiceRecognizerHelper(
             onError(SpeechRecognizer.ERROR_CLIENT)
             return
         }
-        stopListening()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    onListeningChanged(true)
-                }
-
-                override fun onBeginningOfSpeech() = Unit
-
-                override fun onRmsChanged(rmsdB: Float) = Unit
-
-                override fun onBufferReceived(buffer: ByteArray?) = Unit
-
-                override fun onEndOfSpeech() {
-                    onListeningChanged(false)
-                }
-
-                override fun onError(error: Int) {
-                    onListeningChanged(false)
-                    onError(error)
-                }
-
-                override fun onResults(results: Bundle?) {
-                    onListeningChanged(false)
-                    val matches = results
-                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                    if (!matches.isNullOrBlank()) {
-                        onResult(matches)
-                    }
-                }
-
-                override fun onPartialResults(partialResults: Bundle?) = Unit
-
-                override fun onEvent(eventType: Int, params: Bundle?) = Unit
-            })
-            startListening(createIntent())
+        speechRecognizer?.destroy()
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
+            it.setRecognitionListener(createListener())
+            it.startListening(createIntent())
         }
     }
 
     fun stopListening() {
         speechRecognizer?.stopListening()
+        onListeningChanged(false)
+    }
+
+    fun destroy() {
         speechRecognizer?.destroy()
         speechRecognizer = null
         onListeningChanged(false)
+    }
+
+    private fun createListener(): RecognitionListener = object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) {
+            onListeningChanged(true)
+        }
+
+        override fun onBeginningOfSpeech() = Unit
+
+        override fun onRmsChanged(rmsdB: Float) = Unit
+
+        override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+        override fun onEndOfSpeech() {
+            onListeningChanged(false)
+        }
+
+        override fun onError(error: Int) {
+            onListeningChanged(false)
+            this@VoiceRecognizerHelper.onError(error)
+        }
+
+        override fun onResults(results: Bundle?) {
+            onListeningChanged(false)
+            val matches = results
+                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()
+            if (!matches.isNullOrBlank()) {
+                onResult(matches)
+            } else {
+                this@VoiceRecognizerHelper.onError(SpeechRecognizer.ERROR_NO_MATCH)
+            }
+        }
+
+        override fun onPartialResults(partialResults: Bundle?) = Unit
+
+        override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }
 
     private fun createIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -75,5 +83,19 @@ class VoiceRecognizerHelper(
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("ru", "RU").toLanguageTag())
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+    }
+
+    companion object {
+        fun userMessageForError(errorCode: Int): String = when (errorCode) {
+            SpeechRecognizer.ERROR_NO_MATCH -> "Не расслышал — попробуйте ещё раз"
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Тишина — повторите фразу"
+            SpeechRecognizer.ERROR_NETWORK,
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Нет сети для распознавания"
+            SpeechRecognizer.ERROR_AUDIO -> "Ошибка микрофона"
+            SpeechRecognizer.ERROR_CLIENT -> "Распознавание недоступно"
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Нужен доступ к микрофону"
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Распознавание занято — подождите"
+            else -> "Ошибка голосового ввода"
+        }
     }
 }
