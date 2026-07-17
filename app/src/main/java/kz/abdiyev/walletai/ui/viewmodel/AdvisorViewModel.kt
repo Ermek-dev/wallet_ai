@@ -3,7 +3,11 @@ package kz.abdiyev.walletai.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kz.abdiyev.walletai.ai.AdviceResult
+import kz.abdiyev.walletai.domain.model.Currency
+import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.Settings
+import kz.abdiyev.walletai.domain.model.TransactionData
+import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.domain.repository.AdviceRepository
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
@@ -13,8 +17,36 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+data class AdvisorStats(
+    val income: Money,
+    val expense: Money,
+    val savingsRatePercent: Int
+) {
+    companion object {
+        fun compute(transactions: List<TransactionData>, currency: Currency): AdvisorStats {
+            val incomeMinor = transactions
+                .filter { it.type == TransactionType.INCOME }
+                .sumOf { it.money.amountMinor }
+            val expenseMinor = transactions
+                .filter { it.type == TransactionType.EXPENSE }
+                .sumOf { it.money.amountMinor }
+            val savingsRatePercent = if (incomeMinor > 0) {
+                ((incomeMinor - expenseMinor).coerceAtLeast(0) * 100 / incomeMinor).toInt()
+            } else {
+                0
+            }
+            return AdvisorStats(
+                income = Money(incomeMinor, currency),
+                expense = Money(expenseMinor, currency),
+                savingsRatePercent = savingsRatePercent
+            )
+        }
+    }
+}
 
 sealed class AdvisorUiState {
     data object Idle : AdvisorUiState()
@@ -33,6 +65,17 @@ class AdvisorViewModel(
     val settings = settingsRepository.settings.stateIn(viewModelScope, SharingStarted.Lazily, Settings())
     private val _advisorState = MutableStateFlow<AdvisorUiState>(AdvisorUiState.Idle)
     val advisorState: StateFlow<AdvisorUiState> = _advisorState.asStateFlow()
+
+    val statsState: StateFlow<AdvisorStats> = combine(
+        transactionRepository.transactions,
+        settingsRepository.settings
+    ) { transactions, settings ->
+        AdvisorStats.compute(transactions, Currency.fromCode(settings.currencyCode))
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        AdvisorStats.compute(emptyList(), Currency.KZT)
+    )
 
     fun loadAiFinancialAdvice(forceRefresh: Boolean = false) {
         if (_advisorState.value is AdvisorUiState.Loading) return
