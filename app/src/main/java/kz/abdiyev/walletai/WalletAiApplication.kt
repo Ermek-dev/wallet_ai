@@ -24,7 +24,9 @@ class WalletAiApplication : Application() {
         }
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            Timber.e(throwable, "Uncaught exception in thread %s", thread.name)
+            if (BuildConfig.DEBUG) {
+                Timber.e(throwable, "Uncaught exception in thread %s", thread.name)
+            }
             defaultHandler?.uncaughtException(thread, throwable)
         }
         startKoin {
