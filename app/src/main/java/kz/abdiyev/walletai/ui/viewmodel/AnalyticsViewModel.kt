@@ -1,8 +1,10 @@
 package kz.abdiyev.walletai.ui.viewmodel
 
+import androidx.compose.runtime.Immutable
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kz.abdiyev.walletai.domain.category.CategoryRollup
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.Period
@@ -12,16 +14,20 @@ import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
 import kz.abdiyev.walletai.domain.repository.TransactionRepository
+import kz.abdiyev.walletai.util.Clock
 import kz.abdiyev.walletai.util.Exporter
 import kz.abdiyev.walletai.util.PeriodFilter
 import kz.abdiyev.walletai.util.PeriodLabels
+import kz.abdiyev.walletai.util.SystemClock
 import kz.abdiyev.walletai.util.TimeUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -31,6 +37,7 @@ enum class AnalyticsChartMode {
     INCOME
 }
 
+@Immutable
 data class CategoryShareUi(
     val categoryId: Long,
     val name: String,
@@ -38,9 +45,11 @@ data class CategoryShareUi(
     val iconName: String,
     val amountMinor: Long,
     val percentage: Float,
-    val isOther: Boolean = false
+    val isOther: Boolean = false,
+    val subShares: List<CategoryShareUi> = emptyList()
 )
 
+@Immutable
 data class AnalyticsUiState(
     val period: Period = Period.MONTH,
     val customRange: PeriodRange? = null,
@@ -58,11 +67,13 @@ data class AnalyticsUiState(
     val hiddenByPeriodCount: Int = 0
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AnalyticsViewModel(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
     private val settingsRepository: SettingsRepository,
-    private val exporter: Exporter
+    private val exporter: Exporter,
+    private val clock: Clock = SystemClock
 ) : ViewModel() {
 
     private val _selectedPeriod = MutableStateFlow(Period.MONTH)
@@ -75,15 +86,14 @@ class AnalyticsViewModel(
     val chartMode: StateFlow<AnalyticsChartMode> = _chartMode.asStateFlow()
 
     val uiState: StateFlow<AnalyticsUiState> = combine(
-        combine(
-            transactionRepository.transactions,
-            categoryRepository.categories,
-            settingsRepository.settings,
-            ::Triple
-        ),
+        transactionRepository.transactions,
+        categoryRepository.categories,
+        settingsRepository.settings,
         combine(_selectedPeriod, _customRange, _chartMode, ::Triple)
-    ) { (txs, categories, settings), (period, customRange, chartMode) ->
-        buildAnalyticsUiState(txs, categories, settings, period, customRange, chartMode)
+    ) { _, categories, settings, (period, customRange, chartMode) ->
+        AnalyticsQuery(categories, settings, period, customRange, chartMode)
+    }.mapLatest { query ->
+        buildAnalyticsUiState(query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AnalyticsUiState())
 
     fun setPeriod(period: Period) {
@@ -137,26 +147,29 @@ class AnalyticsViewModel(
     ) = PeriodFilter.filter(
         allTransactions,
         period,
-        System.currentTimeMillis(),
-        TimeUtils.localOffsetMillis(),
+        clock.nowMillis(),
+        TimeUtils.localOffsetMillis(clock.nowMillis()),
         customRange
     )
 
-    private fun buildAnalyticsUiState(
-        transactions: List<kz.abdiyev.walletai.domain.model.TransactionData>,
-        categories: List<CategoryData>,
-        settings: Settings,
-        period: Period,
-        customRange: PeriodRange?,
-        chartMode: AnalyticsChartMode
-    ): AnalyticsUiState {
-        val now = System.currentTimeMillis()
+    private suspend fun buildAnalyticsUiState(query: AnalyticsQuery): AnalyticsUiState {
+        val (categories, settings, period, customRange, chartMode) = query
+        val now = clock.nowMillis()
         val offset = TimeUtils.localOffsetMillis(now)
-        val filtered = PeriodFilter.filter(transactions, period, now, offset, customRange)
-        val expenses = filtered.filter { it.type == TransactionType.EXPENSE }
-        val incomes = filtered.filter { it.type == TransactionType.INCOME }
-        val totalExpenseMinor = expenses.sumOf { it.money.amountMinor }
-        val totalIncomeMinor = incomes.sumOf { it.money.amountMinor }
+        val bounds = PeriodFilter.bounds(period, now, offset, customRange)
+        val startInclusive = bounds?.startInclusive
+        val endExclusive = bounds?.endExclusive
+
+        val totalExpenseMinor = transactionRepository.sumByType(
+            TransactionType.EXPENSE,
+            startInclusive,
+            endExclusive
+        )
+        val totalIncomeMinor = transactionRepository.sumByType(
+            TransactionType.INCOME,
+            startInclusive,
+            endExclusive
+        )
         val balanceMinor = totalIncomeMinor - totalExpenseMinor
         val savingsRate = if (totalIncomeMinor > 0) {
             balanceMinor.toFloat() / totalIncomeMinor.toFloat() * 100f
@@ -168,24 +181,54 @@ class AnalyticsViewModel(
             AnalyticsChartMode.EXPENSE -> TransactionType.EXPENSE
             AnalyticsChartMode.INCOME -> TransactionType.INCOME
         }
-        val activeTransactions = filtered.filter { it.type == activeType }
-        val activeTotalMinor = activeTransactions.sumOf { it.money.amountMinor }
+        val activeTotalMinor = transactionRepository.sumByType(activeType, startInclusive, endExclusive)
+        val amountsByCategory = transactionRepository.sumByCategoryGrouped(
+            activeType,
+            startInclusive,
+            endExclusive
+        )
+
         val rawShares = if (activeTotalMinor == 0L) {
             emptyList()
         } else {
-            activeTransactions.groupBy { it.categoryId }.map { (catId, txs) ->
-                val category = categories.find { it.id == catId }
-                    ?: CategoryData(id = catId, name = "Другое", type = activeType, colorHex = "#757575", iconName = "")
-                val sumMinor = txs.sumOf { it.money.amountMinor }
+            CategoryRollup.rollup(amountsByCategory, categories).map { rolled ->
+                val category = categories.find { it.id == rolled.rootCategoryId }
+                    ?: CategoryData(
+                        id = rolled.rootCategoryId,
+                        name = "Другое",
+                        type = activeType,
+                        colorHex = "#757575",
+                        iconName = ""
+                    )
+                val subShares = rolled.subShares.mapNotNull { sub ->
+                    if (sub.categoryId == rolled.rootCategoryId && rolled.subShares.size == 1) return@mapNotNull null
+                    val subCategory = categories.find { it.id == sub.categoryId } ?: return@mapNotNull null
+                    CategoryShareUi(
+                        categoryId = subCategory.id,
+                        name = subCategory.name,
+                        colorHex = subCategory.colorHex,
+                        iconName = subCategory.iconName,
+                        amountMinor = sub.amountMinor,
+                        percentage = sub.amountMinor.toFloat() / activeTotalMinor.toFloat() * 100f
+                    )
+                }
                 CategoryShareUi(
                     categoryId = category.id,
                     name = category.name,
                     colorHex = category.colorHex,
                     iconName = category.iconName,
-                    amountMinor = sumMinor,
-                    percentage = sumMinor.toFloat() / activeTotalMinor.toFloat() * 100f
+                    amountMinor = rolled.amountMinor,
+                    percentage = rolled.amountMinor.toFloat() / activeTotalMinor.toFloat() * 100f,
+                    subShares = subShares
                 )
-            }.sortedByDescending { it.amountMinor }
+            }
+        }
+
+        val hiddenByPeriodCount = if (period == Period.ALL || bounds == null) {
+            0
+        } else {
+            transactionRepository.countAll() -
+                transactionRepository.countInPeriod(bounds.startInclusive, bounds.endExclusive)
         }
 
         return AnalyticsUiState(
@@ -202,9 +245,17 @@ class AnalyticsViewModel(
             activeTotalMinor = activeTotalMinor,
             categoryShares = aggregateTopShares(rawShares),
             currencyCode = settings.currencyCode,
-            hiddenByPeriodCount = PeriodFilter.outsideCount(transactions, period, now, offset, customRange)
+            hiddenByPeriodCount = hiddenByPeriodCount
         )
     }
+
+    private data class AnalyticsQuery(
+        val categories: List<CategoryData>,
+        val settings: Settings,
+        val period: Period,
+        val customRange: PeriodRange?,
+        val chartMode: AnalyticsChartMode
+    )
 
     companion object {
         private const val MAX_VISIBLE_CATEGORIES = 8

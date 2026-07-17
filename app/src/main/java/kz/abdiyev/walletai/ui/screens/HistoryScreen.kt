@@ -25,11 +25,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kz.abdiyev.walletai.R
 import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.ui.components.DayGroupCard
+import kz.abdiyev.walletai.ui.components.WalletEmptyState
 import kz.abdiyev.walletai.ui.theme.SmallShape
 import kz.abdiyev.walletai.ui.theme.WalletAiTheme
 import kz.abdiyev.walletai.ui.viewmodel.HistoryViewModel
@@ -62,7 +65,7 @@ fun HistoryScreen(
                 title = { Text("История операций", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.history_back))
                     }
                 },
                 windowInsets = WindowInsets(0.dp),
@@ -85,8 +88,8 @@ fun HistoryScreen(
                     value = historyQuery,
                     onValueChange = viewModel::setHistoryQuery,
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Поиск по описанию") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    placeholder = { Text(stringResource(R.string.history_search_hint)) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = stringResource(R.string.history_search)) },
                     singleLine = true,
                     shape = SmallShape,
                     colors = TextFieldDefaults.colors(
@@ -98,11 +101,7 @@ fun HistoryScreen(
 
             if (groupedHistory.isEmpty()) {
                 item {
-                    Text(
-                        text = "Нет операций",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 24.dp)
-                    )
+                    WalletEmptyState(message = stringResource(R.string.history_empty))
                 }
             } else {
                 item {

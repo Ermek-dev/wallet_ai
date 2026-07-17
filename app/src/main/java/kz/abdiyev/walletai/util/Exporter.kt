@@ -36,15 +36,19 @@ class Exporter {
         FileOutputStream(file).use { fos ->
             fos.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
             val writer = fos.writer(Charsets.UTF_8)
-            writer.write("ID;Дата;Тип;Категория;Сумма;Описание;Авто-категоризация\n")
+            writer.write("ID;Дата;Тип;Категория;Подкатегория;Сумма;Описание;Авто-категоризация\n")
             for (tx in transactions) {
                 val dateStr = dateOnlyFormat.format(Date(tx.date))
                 val typeStr = if (tx.type == TransactionType.INCOME) "Доход" else "Расход"
-                val catName = categoryMap[tx.categoryId]?.name ?: "Другое"
+                val category = categoryMap[tx.categoryId]
+                val rootName = category?.parentId?.let { categoryMap[it]?.name }
+                    ?: category?.name
+                    ?: "Другое"
+                val subName = if (category?.parentId != null) category.name else ""
                 val amountStr = MoneyFormatter.format(tx.money)
                 val cleanDesc = tx.description.replace(";", " ").replace("\n", " ")
                 val autoStr = if (tx.isAutoCategorized) "Да (ИИ)" else "Нет"
-                writer.write("${tx.id};$dateStr;$typeStr;$catName;$amountStr;$cleanDesc;$autoStr\n")
+                writer.write("${tx.id};$dateStr;$typeStr;$rootName;$subName;$amountStr;$cleanDesc;$autoStr\n")
             }
             writer.flush()
         }

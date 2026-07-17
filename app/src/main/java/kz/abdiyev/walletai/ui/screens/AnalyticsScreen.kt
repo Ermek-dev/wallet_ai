@@ -98,6 +98,7 @@ import kz.abdiyev.walletai.ui.components.SegmentedPeriodSelector
 
 import kz.abdiyev.walletai.ui.components.SegmentedToggle
 
+import kz.abdiyev.walletai.ui.components.WalletEmptyState
 import kz.abdiyev.walletai.ui.components.WalletSurfaceCard
 
 import kz.abdiyev.walletai.ui.theme.WalletAiTheme
@@ -105,6 +106,7 @@ import kz.abdiyev.walletai.ui.theme.WalletAiTheme
 import kz.abdiyev.walletai.ui.viewmodel.AnalyticsChartMode
 
 import kz.abdiyev.walletai.ui.viewmodel.AnalyticsViewModel
+import kz.abdiyev.walletai.ui.viewmodel.CategoryShareUi
 
 import kz.abdiyev.walletai.util.MoneyFormatter
 import kz.abdiyev.walletai.util.Plurals
@@ -144,36 +146,10 @@ fun AnalyticsScreen(
 
 
 
-    val categoryShares = remember(uiState.categoryShares) {
-
+    val categoryShares = remember(uiState.categoryShares, isExpenseMode) {
         uiState.categoryShares.map { share ->
-
-            CategoryShare(
-
-                category = CategoryData(
-
-                    id = share.categoryId,
-
-                    name = share.name,
-
-                    type = if (isExpenseMode) TransactionType.EXPENSE else TransactionType.INCOME,
-
-                    colorHex = share.colorHex,
-
-                    iconName = share.iconName
-
-                ),
-
-                amountMinor = share.amountMinor,
-
-                percentage = share.percentage,
-
-                color = parseColorHex(share.colorHex)
-
-            )
-
+            share.toCategoryShare(isExpenseMode)
         }
-
     }
 
 
@@ -206,65 +182,33 @@ fun AnalyticsScreen(
 
         item { ScreenTitle("Аналитика") }
 
-
-
         item {
-
-            SegmentedPeriodSelector(
-
-                selected = uiState.period,
-
-                hasCustomRange = uiState.customRange != null,
-
-                onSelectPreset = viewModel::setPeriod,
-
-                onCustomClick = { showPeriodPicker = true }
-
-            )
-
-        }
-
-
-
-        item {
-
-            Text(
-
-                text = uiState.periodRangeLabel,
-
-                style = MaterialTheme.typography.labelMedium,
-
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-
-            )
-
-        }
-
-
-
-        item {
-
             SegmentedToggle(
-
                 options = listOf("Расходы", "Доходы"),
-
                 selectedIndex = if (isExpenseMode) 0 else 1,
-
                 onSelect = { index ->
-
                     viewModel.setChartMode(
-
                         if (index == 0) AnalyticsChartMode.EXPENSE else AnalyticsChartMode.INCOME
-
                     )
-
                 }
-
             )
-
         }
 
-
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SegmentedPeriodSelector(
+                    selected = uiState.period,
+                    hasCustomRange = uiState.customRange != null,
+                    onSelectPreset = viewModel::setPeriod,
+                    onCustomClick = { showPeriodPicker = true }
+                )
+                Text(
+                    text = uiState.periodRangeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
 
         item {
 
@@ -338,51 +282,23 @@ fun AnalyticsScreen(
             item {
 
                 WalletSurfaceCard {
-
-                    Column(
-
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp, horizontal = 16.dp),
-
-                        horizontalAlignment = Alignment.CenterHorizontally,
-
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-
-                    ) {
-
-                        Text(
-
-                            text = if (isExpenseMode) {
-
-                                "Недостаточно данных расходов."
-
-                            } else {
-
-                                "Недостаточно данных доходов."
-
-                            },
-
-                            style = MaterialTheme.typography.bodyMedium,
-
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-
-                        )
-
-                        if (uiState.hiddenByPeriodCount > 0) {
-
-                            HiddenByPeriodHint(
-
-                                hiddenCount = uiState.hiddenByPeriodCount,
-
-                                onShowAll = { viewModel.setPeriod(Period.ALL) }
-
-                            )
-
+                    WalletEmptyState(
+                        message = if (isExpenseMode) {
+                            "Недостаточно данных расходов."
+                        } else {
+                            "Недостаточно данных доходов."
+                        },
+                        footer = if (uiState.hiddenByPeriodCount > 0) {
+                            {
+                                HiddenByPeriodHint(
+                                    hiddenCount = uiState.hiddenByPeriodCount,
+                                    onShowAll = { viewModel.setPeriod(Period.ALL) }
+                                )
+                            }
+                        } else {
+                            null
                         }
-
-                    }
-
+                    )
                 }
 
             }
@@ -568,7 +484,7 @@ fun AnalyticsScreen(
 
                 ) {
 
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Share, contentDescription = "Экспорт", modifier = Modifier.size(16.dp))
 
                     Spacer(modifier = Modifier.width(6.dp))
 
@@ -592,5 +508,22 @@ fun AnalyticsScreen(
 
     }
 
+}
+
+private fun CategoryShareUi.toCategoryShare(isExpenseMode: Boolean): CategoryShare {
+    val type = if (isExpenseMode) TransactionType.EXPENSE else TransactionType.INCOME
+    return CategoryShare(
+        category = CategoryData(
+            id = categoryId,
+            name = name,
+            type = type,
+            colorHex = colorHex,
+            iconName = iconName
+        ),
+        amountMinor = amountMinor,
+        percentage = percentage,
+        color = parseColorHex(colorHex),
+        subShares = subShares.map { it.toCategoryShare(isExpenseMode) }
+    )
 }
 
