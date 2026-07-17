@@ -4,6 +4,8 @@ import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.domain.usecase.ImportStatementUseCase
+import kz.abdiyev.walletai.domain.usecase.SaveTransactionUseCase
 import kz.abdiyev.walletai.ml.BankStatementParser
 import kz.abdiyev.walletai.ml.TransactionClassifier
 import kz.abdiyev.walletai.test.FakeCategoryRepository
@@ -46,7 +48,16 @@ class ImportViewModelTest {
             settingsRepository = FakeSettingsRepository(),
             merchantRuleRepository = FakeMerchantRuleRepository(),
             classifier = TransactionClassifier(),
-            bankStatementParser = BankStatementParser()
+            importStatementUseCase = ImportStatementUseCase(
+                transactionRepo,
+                FakeMerchantRuleRepository(),
+                BankStatementParser()
+            ),
+            saveTransactionUseCase = SaveTransactionUseCase(
+                transactionRepo,
+                FakeMerchantRuleRepository(),
+                TransactionClassifier()
+            )
         )
     }
 
@@ -98,5 +109,41 @@ class ImportViewModelTest {
         val committable = viewModel.committablePreviews()
         assertEquals(1, committable.size)
         assertTrue(committable.first().description.contains("Живая Вода"))
+    }
+
+    @Test
+    fun commitPreviews_emitsSuccessWithSavedCount() = runTest {
+        viewModel.parseBankStatement(
+            """
+            www.kaspi.kz
+            29.06.26 - 15,00 ₸ Покупка Живая Вода
+            """.trimIndent()
+        )
+        advanceUntilIdle()
+
+        viewModel.commitPreviews()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state is ImportUiState.Success)
+        assertEquals(1, (state as ImportUiState.Success).savedCount)
+        assertTrue(viewModel.parsedPreviews.value.isEmpty())
+        assertEquals(1, transactionRepo.getAll().size)
+    }
+
+    @Test
+    fun acknowledgeSuccess_returnsToIdle() = runTest {
+        viewModel.parseBankStatement(
+            """
+            www.kaspi.kz
+            29.06.26 - 15,00 ₸ Покупка Живая Вода
+            """.trimIndent()
+        )
+        advanceUntilIdle()
+        viewModel.commitPreviews()
+        advanceUntilIdle()
+
+        viewModel.acknowledgeSuccess()
+        assertEquals(ImportUiState.Idle, viewModel.uiState.value)
     }
 }

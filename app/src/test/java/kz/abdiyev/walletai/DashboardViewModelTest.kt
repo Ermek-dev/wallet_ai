@@ -4,6 +4,7 @@ import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.domain.usecase.SaveTransactionUseCase
 import kz.abdiyev.walletai.ml.TransactionClassifier
 import kz.abdiyev.walletai.ml.VoiceInputParser
 import kz.abdiyev.walletai.test.FakeCategoryRepository
@@ -41,13 +42,18 @@ class DashboardViewModelTest {
         Dispatchers.setMain(testDispatcher)
         transactionRepo = FakeTransactionRepository()
         clock = FakeClock()
+        val merchantRules = FakeMerchantRuleRepository()
         viewModel = DashboardViewModel(
             transactionRepository = transactionRepo,
             categoryRepository = FakeCategoryRepository(),
             settingsRepository = FakeSettingsRepository(),
-            merchantRuleRepository = FakeMerchantRuleRepository(),
             classifier = TransactionClassifier(),
             voiceInputParser = VoiceInputParser(),
+            saveTransactionUseCase = SaveTransactionUseCase(
+                transactionRepo,
+                merchantRules,
+                TransactionClassifier()
+            ),
             clock = clock
         )
     }
