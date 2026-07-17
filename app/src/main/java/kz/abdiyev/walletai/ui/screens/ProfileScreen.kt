@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.UploadFile
@@ -62,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kz.abdiyev.walletai.domain.category.CategoryHierarchyValidator
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.ThemeMode
@@ -100,6 +102,7 @@ fun ProfileScreen(
     val notificationHour = settings.notificationHour
     val notificationMinute = settings.notificationMinute
     val dynamicEffects = settings.dynamicEffects
+    val dynamicColor = settings.dynamicColor
     val currency = remember(currencyCode) { Currency.fromCode(currencyCode) }
 
     var localUserName by remember(userName) { mutableStateOf(userName) }
@@ -120,6 +123,18 @@ fun ProfileScreen(
     }
 
     val initials = remember(userName) { userName.trim().take(2).ifBlank { "?" }.uppercase() }
+
+    val groupedCategories = remember(categories) {
+        val roots = categories.filter { it.parentId == null }.sortedBy { it.name }
+        buildList {
+            roots.forEach { root ->
+                add(root to 0)
+                categories.filter { it.parentId == root.id }
+                    .sortedBy { it.name }
+                    .forEach { child -> add(child to 1) }
+            }
+        }
+    }
 
     LazyColumn(
         modifier = modifier
@@ -232,6 +247,19 @@ fun ProfileScreen(
                     },
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    SettingsRow(
+                        icon = Icons.Default.Palette,
+                        title = "Material You",
+                        subtitle = "Цвета из обоев системы (Android 12+)"
+                    ) {
+                        Switch(
+                            checked = dynamicColor,
+                            onCheckedChange = viewModel::setDynamicColor
+                        )
+                    }
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 SettingsRow(
                     icon = Icons.Default.TouchApp,
@@ -306,10 +334,12 @@ fun ProfileScreen(
             }
         }
 
-        items(categories, key = { it.id }) { category ->
+        items(groupedCategories, key = { it.first.id }) { (category, indentLevel) ->
             val color = parseColorHex(category.colorHex)
             WalletSurfaceCard(
-                modifier = Modifier.clickable { editingCategory = category }
+                modifier = Modifier
+                    .padding(start = (indentLevel * 16).dp)
+                    .clickable { editingCategory = category }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -320,7 +350,14 @@ fun ProfileScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(category.name, fontWeight = FontWeight.Medium)
                         Text(
-                            if (category.type == TransactionType.INCOME) "Доход" else "Расход",
+                            buildString {
+                                append(if (category.type == TransactionType.INCOME) "Доход" else "Расход")
+                                category.parentId?.let { parentId ->
+                                    categories.find { it.id == parentId }?.let { parent ->
+                                        append(" · ${parent.name}")
+                                    }
+                                }
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -376,6 +413,7 @@ fun ProfileScreen(
     if (showAddCategory || editingCategory != null) {
         CategoryEditDialog(
             existing = editingCategory,
+            allCategories = categories,
             onDismiss = {
                 showAddCategory = false
                 editingCategory = null
@@ -465,6 +503,7 @@ fun ProfileScreen(
 @Composable
 private fun CategoryEditDialog(
     existing: CategoryData?,
+    allCategories: List<CategoryData>,
     onDismiss: () -> Unit,
     onSave: (CategoryData) -> Unit
 ) {
@@ -472,6 +511,16 @@ private fun CategoryEditDialog(
     var type by remember(existing) { mutableStateOf(existing?.type ?: TransactionType.EXPENSE) }
     var colorHex by remember(existing) { mutableStateOf(existing?.colorHex ?: categoryColorOptions.first()) }
     var iconName by remember(existing) { mutableStateOf(existing?.iconName ?: categoryIconOptions.first()) }
+    var parentId by remember(existing) { mutableStateOf(existing?.parentId) }
+
+    val parentOptions = remember(allCategories, type, existing) {
+        allCategories.filter { candidate ->
+            candidate.parentId == null &&
+                candidate.type == type &&
+                candidate.id != existing?.id &&
+                CategoryHierarchyValidator.canHaveSubcategories(candidate)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -492,8 +541,26 @@ private fun CategoryEditDialog(
                     selectedIndex = if (type == TransactionType.EXPENSE) 0 else 1,
                     onSelect = { index ->
                         type = if (index == 0) TransactionType.EXPENSE else TransactionType.INCOME
+                        parentId = null
                     }
                 )
+                if (parentOptions.isNotEmpty()) {
+                    Text("Родительская категория", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = parentId == null,
+                            onClick = { parentId = null },
+                            label = { Text("Нет") }
+                        )
+                        parentOptions.forEach { parent ->
+                            FilterChip(
+                                selected = parentId == parent.id,
+                                onClick = { parentId = parent.id },
+                                label = { Text(parent.name) }
+                            )
+                        }
+                    }
+                }
                 Text("Цвет", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     categoryColorOptions.forEach { hex ->
@@ -532,7 +599,8 @@ private fun CategoryEditDialog(
                             type = type,
                             colorHex = colorHex,
                             iconName = iconName,
-                            isSystem = existing?.isSystem ?: false
+                            isSystem = existing?.isSystem ?: false,
+                            parentId = parentId
                         )
                     )
                 },
