@@ -48,4 +48,11 @@ object DatabaseMigrations {
             db.execSQL("UPDATE categories SET isSystem = 1 WHERE name = 'Другое'")
         }
     }
+
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE categories ADD COLUMN parentId INTEGER DEFAULT NULL")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_categories_parentId ON categories(parentId)")
+        }
+    }
 }

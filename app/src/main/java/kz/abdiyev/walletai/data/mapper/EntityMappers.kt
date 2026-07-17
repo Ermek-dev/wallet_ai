@@ -14,7 +14,8 @@ fun CategoryEntity.toDomain(): CategoryData = CategoryData(
     type = TransactionType.fromDb(type),
     colorHex = colorHex,
     iconName = iconName,
-    isSystem = isSystem
+    isSystem = isSystem,
+    parentId = parentId
 )
 
 fun CategoryData.toEntity(): CategoryEntity = CategoryEntity(
@@ -23,7 +24,8 @@ fun CategoryData.toEntity(): CategoryEntity = CategoryEntity(
     type = type.dbValue,
     colorHex = colorHex,
     iconName = iconName,
-    isSystem = isSystem
+    isSystem = isSystem,
+    parentId = parentId
 )
 
 fun TransactionEntity.toDomain(): TransactionData = TransactionData(

@@ -4,14 +4,18 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "categories")
+@Entity(
+    tableName = "categories",
+    indices = [Index(value = ["parentId"])]
+)
 data class CategoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val type: String,
     val colorHex: String,
     val iconName: String,
-    val isSystem: Boolean = false
+    val isSystem: Boolean = false,
+    val parentId: Long? = null
 )
 
 @Entity(

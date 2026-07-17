@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [CategoryEntity::class, TransactionEntity::class, MerchantRuleEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,7 +28,8 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                     .addMigrations(
                         DatabaseMigrations.MIGRATION_1_2,
-                        DatabaseMigrations.MIGRATION_2_3
+                        DatabaseMigrations.MIGRATION_2_3,
+                        DatabaseMigrations.MIGRATION_3_4
                     )
                     .build()
                     .also { INSTANCE = it }
