@@ -10,5 +10,6 @@ data class Settings(
     val notificationHour: Int = 21,
     val notificationMinute: Int = 0,
     val biometricEnabled: Boolean = false,
-    val dynamicEffects: Boolean = true
+    val dynamicEffects: Boolean = true,
+    val dynamicColor: Boolean = false
 )
