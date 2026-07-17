@@ -8,17 +8,22 @@ import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.model.TransactionData
+import kz.abdiyev.walletai.domain.model.TransactionPreview
 import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.MerchantRuleRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
 import kz.abdiyev.walletai.domain.repository.TransactionRepository
-import kz.abdiyev.walletai.ml.BankStatementParser
+import kz.abdiyev.walletai.domain.usecase.ImportStatementResult
+import kz.abdiyev.walletai.domain.usecase.ImportStatementUseCase
+import kz.abdiyev.walletai.domain.usecase.SaveTransactionResult
+import kz.abdiyev.walletai.domain.usecase.SaveTransactionUseCase
 import kz.abdiyev.walletai.ml.TransactionClassifier
 import kz.abdiyev.walletai.ml.statement.StatementFormat
 import kz.abdiyev.walletai.util.CalendarMillis
-import kz.abdiyev.walletai.util.DescriptionNormalizer
+import kz.abdiyev.walletai.util.Clock
 import kz.abdiyev.walletai.util.PdfTextExtractor
+import kz.abdiyev.walletai.util.SystemClock
 import kz.abdiyev.walletai.util.TimeUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +51,7 @@ sealed interface ImportUiState {
     data class Parsing(val sourceLabel: String) : ImportUiState
     data class Preview(val summary: ImportSummary, val sourceLabel: String) : ImportUiState
     data object Saving : ImportUiState
+    data class Success(val savedCount: Int) : ImportUiState
     data class Error(val message: String) : ImportUiState
 }
 
@@ -55,23 +61,22 @@ class ImportViewModel(
     private val settingsRepository: SettingsRepository,
     private val merchantRuleRepository: MerchantRuleRepository,
     private val classifier: TransactionClassifier,
-    private val bankStatementParser: BankStatementParser
+    private val importStatementUseCase: ImportStatementUseCase,
+    private val saveTransactionUseCase: SaveTransactionUseCase,
+    private val clock: Clock = SystemClock
 ) : ViewModel() {
 
     val categories = categoryRepository.categories.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val settings = settingsRepository.settings.stateIn(viewModelScope, SharingStarted.Lazily, Settings())
 
-    private val _parsedPreviews = MutableStateFlow<List<ParsedPreview>>(emptyList())
-    val parsedPreviews: StateFlow<List<ParsedPreview>> = _parsedPreviews.asStateFlow()
+    private val _parsedPreviews = MutableStateFlow<List<TransactionPreview>>(emptyList())
+    val parsedPreviews: StateFlow<List<TransactionPreview>> = _parsedPreviews.asStateFlow()
 
     private val _uiState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
     val uiState: StateFlow<ImportUiState> = _uiState.asStateFlow()
 
     private val _skipTransfers = MutableStateFlow(true)
     val skipTransfers: StateFlow<Boolean> = _skipTransfers.asStateFlow()
-
-    private val _importMessage = MutableStateFlow<String?>(null)
-    val importMessage: StateFlow<String?> = _importMessage.asStateFlow()
 
     private var trainedModel: TransactionClassifier.TrainedModel? = null
 
@@ -125,38 +130,25 @@ class ImportViewModel(
             if (trainedModel == null) refreshModel()
             val currency = Currency.fromCode(settings.value.currencyCode)
             val cats = categoryRepository.getAll()
-            val parseResult = bankStatementParser.parse(text, cats, trainedModel, currency)
-
-            if (parseResult.lines.isEmpty()) {
-                _parsedPreviews.value = emptyList()
-                _uiState.value = ImportUiState.Error("Операций не найдено")
-                return
-            }
-
-            val existingKeys = transactionRepository.getAll()
-                .map { dedupKey(it.date, it.money.amountMinor, it.description) }
-                .toSet()
-
-            val previews = parseResult.lines.map { line ->
-                var categoryId = line.predictedCategoryId
-                merchantRuleRepository.findCategoryId(line.description)?.let { categoryId = it }
-
-                val duplicate = dedupKey(line.date, line.money.amountMinor, line.description) in existingKeys
-                ParsedPreview(
-                    id = line.id,
-                    money = line.money,
-                    type = line.type,
-                    description = line.description,
-                    predictedCategoryId = categoryId,
-                    date = line.date,
-                    isTransfer = line.isTransfer,
-                    isDuplicate = duplicate
+            when (
+                val result = importStatementUseCase.execute(
+                    text = text,
+                    categories = cats,
+                    currency = currency,
+                    trainedModel = trainedModel,
+                    defaultDateMillis = clock.nowMillis()
                 )
+            ) {
+                ImportStatementResult.Empty -> {
+                    _parsedPreviews.value = emptyList()
+                    _uiState.value = ImportUiState.Error("Операций не найдено")
+                }
+                is ImportStatementResult.Success -> {
+                    _parsedPreviews.value = result.previews
+                    val summary = buildSummary(result.previews, result.format)
+                    _uiState.value = ImportUiState.Preview(summary, sourceLabel)
+                }
             }
-
-            _parsedPreviews.value = previews
-            val summary = buildSummary(previews, parseResult.format)
-            _uiState.value = ImportUiState.Preview(summary, sourceLabel)
         } catch (e: Exception) {
             Timber.e(e, "Failed to parse bank statement")
             _parsedPreviews.value = emptyList()
@@ -164,7 +156,7 @@ class ImportViewModel(
         }
     }
 
-    private fun buildSummary(previews: List<ParsedPreview>, format: StatementFormat): ImportSummary {
+    private fun buildSummary(previews: List<TransactionPreview>, format: StatementFormat): ImportSummary {
         val expenses = previews.filter { it.type == TransactionType.EXPENSE && !it.isTransfer }
         val incomes = previews.filter { it.type == TransactionType.INCOME && !it.isTransfer }
         return ImportSummary(
@@ -232,23 +224,28 @@ class ImportViewModel(
         viewModelScope.launch {
             _uiState.value = ImportUiState.Saving
             try {
-                withContext(Dispatchers.IO) {
-                    transactionRepository.insertAll(toSave.map {
-                        val offset = TimeUtils.localOffsetMillis(it.date)
-                        TransactionData(
-                            money = it.money,
-                            type = it.type,
-                            categoryId = it.predictedCategoryId,
-                            description = it.description,
-                            date = CalendarMillis.toLocalStartOfDay(it.date, offset),
-                            isAutoCategorized = true
-                        )
-                    })
+                val entities = toSave.map {
+                    val offset = TimeUtils.localOffsetMillis(it.date)
+                    TransactionData(
+                        money = it.money,
+                        type = it.type,
+                        categoryId = it.predictedCategoryId,
+                        description = it.description,
+                        date = CalendarMillis.toLocalStartOfDay(it.date, offset),
+                        isAutoCategorized = true
+                    )
                 }
-                _parsedPreviews.value = emptyList()
-                refreshModel()
-                _uiState.value = ImportUiState.Idle
-                _importMessage.value = "Сохранено ${toSave.size} операций"
+                when (val result = saveTransactionUseCase.executeBatch(entities)) {
+                    is SaveTransactionResult.BatchSuccess -> {
+                        _parsedPreviews.value = emptyList()
+                        refreshModel()
+                        _uiState.value = ImportUiState.Success(result.count)
+                    }
+                    SaveTransactionResult.InvalidAmount,
+                    is SaveTransactionResult.Success -> {
+                        _uiState.value = ImportUiState.Error("Не удалось сохранить операции")
+                    }
+                }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to commit previews")
                 _uiState.value = ImportUiState.Error("Не удалось сохранить операции")
@@ -256,7 +253,7 @@ class ImportViewModel(
         }
     }
 
-    fun committablePreviews(): List<ParsedPreview> {
+    fun committablePreviews(): List<TransactionPreview> {
         val skip = _skipTransfers.value
         return _parsedPreviews.value.filter { preview ->
             !preview.isDuplicate && (!skip || !preview.isTransfer)
@@ -268,8 +265,10 @@ class ImportViewModel(
         _uiState.value = ImportUiState.Idle
     }
 
-    fun clearImportMessage() {
-        _importMessage.value = null
+    fun acknowledgeSuccess() {
+        if (_uiState.value is ImportUiState.Success) {
+            _uiState.value = ImportUiState.Idle
+        }
     }
 
     fun dismissError() {
@@ -277,7 +276,4 @@ class ImportViewModel(
             _uiState.value = ImportUiState.Idle
         }
     }
-
-    private fun dedupKey(date: Long, amountMinor: Long, description: String): Triple<Long, Long, String> =
-        Triple(date, amountMinor, DescriptionNormalizer.normalize(description))
 }

@@ -21,9 +21,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -54,10 +56,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kz.abdiyev.walletai.R
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.TransactionType
@@ -92,7 +96,6 @@ fun ImportScreen(
     val parsedPreviews by viewModel.parsedPreviews.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val skipTransfers by viewModel.skipTransfers.collectAsStateWithLifecycle()
-    val importMessage by viewModel.importMessage.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     val currency = remember(settings.currencyCode) { Currency.fromCode(settings.currencyCode) }
@@ -128,11 +131,9 @@ fun ImportScreen(
         uri?.let { viewModel.parsePdf(context, it) }
     }
 
-    LaunchedEffect(importMessage) {
-        importMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
-            viewModel.clearImportMessage()
-        }
+    fun dismissImportSuccess() {
+        viewModel.acknowledgeSuccess()
+        onBack()
     }
 
     LaunchedEffect(uiState) {
@@ -334,6 +335,29 @@ fun ImportScreen(
             onConfirm = { money, type, categoryId, description, date ->
                 viewModel.updatePreviewEdited(preview.id, money, type, categoryId, description, date)
                 editingPreview = null
+            }
+        )
+    }
+
+    val successState = uiState as? ImportUiState.Success
+    if (successState != null) {
+        AlertDialog(
+            onDismissRequest = ::dismissImportSuccess,
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = { Text(stringResource(R.string.import_success_title)) },
+            text = {
+                Text(stringResource(R.string.import_success_message, successState.savedCount))
+            },
+            confirmButton = {
+                TextButton(onClick = ::dismissImportSuccess) {
+                    Text(stringResource(R.string.action_ok))
+                }
             }
         )
     }
