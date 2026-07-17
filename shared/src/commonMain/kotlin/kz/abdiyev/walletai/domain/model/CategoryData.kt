@@ -6,5 +6,6 @@ data class CategoryData(
     val type: TransactionType,
     val colorHex: String,
     val iconName: String,
-    val isSystem: Boolean = false
+    val isSystem: Boolean = false,
+    val parentId: Long? = null
 )
