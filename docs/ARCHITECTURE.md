@@ -46,7 +46,8 @@ UI (Compose-экраны)  ──собирает StateFlow──  ViewModel (п
 
 | Пакет | Содержимое |
 |---|---|
-| `domain/model` | `Money`, `Currency`, `TransactionType`, `Period`, `Settings`, `TransactionData`, `CategoryData` |
+| `domain/model` | `Money`, `Currency`, `TransactionType`, `Period`, `Settings`, `TransactionData`, `CategoryData` (`parentId`) |
+| `domain/category` | `CategoryHierarchyValidator`, `CategoryRollup` — подкатегории (глубина ≤ 1) |
 | `ml` | `TransactionClassifier`, `BankStatementParser`, `VoiceInputParser`, парсеры Kaspi/Freedom |
 | `ai` | `AdviceAiClient`, `GroqClient`, `AiErrorMapper`, `AdviceCachePolicy` |
 | `util` | `MoneyFormatter`, `PeriodFilter`, `CalendarMillis`, `DescriptionNormalizer`, `ReminderDelayCalculator` |
