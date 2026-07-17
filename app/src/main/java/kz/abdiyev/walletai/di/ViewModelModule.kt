@@ -24,9 +24,9 @@ val viewModelModule = module {
     viewModelOf(::ProfileViewModel)
 }
 
-val appModules = listOf(databaseModule, repositoryModule, aiModule, sensorModule, viewModelModule)
+val appModules = listOf(databaseModule, repositoryModule, aiModule, useCaseModule, sensorModule, viewModelModule)
 
 /** @deprecated Use [appModules] instead. */
 val appModule = module {
-    includes(databaseModule, repositoryModule, aiModule, sensorModule, viewModelModule)
+    includes(databaseModule, repositoryModule, aiModule, useCaseModule, sensorModule, viewModelModule)
 }
