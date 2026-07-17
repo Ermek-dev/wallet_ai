@@ -27,14 +27,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kz.abdiyev.walletai.domain.category.displayName
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Period
 import kz.abdiyev.walletai.domain.model.TransactionData
@@ -123,7 +128,8 @@ fun SegmentedPeriodSelector(
     hasCustomRange: Boolean,
     onSelectPreset: (Period) -> Unit,
     onCustomClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = true
 ) {
     val options = listOf("Период", "Неделя", "Месяц", "Всё")
     val selectedIndex = when {
@@ -144,8 +150,15 @@ fun SegmentedPeriodSelector(
                 3 -> onSelectPreset(Period.ALL)
             }
         },
-        modifier = modifier
+        modifier = modifier,
+        compact = compact,
+        style = SegmentedToggleStyle.Secondary
     )
+}
+
+enum class SegmentedToggleStyle {
+    Primary,
+    Secondary
 }
 
 @Composable
@@ -153,14 +166,37 @@ fun SegmentedToggle(
     options: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    style: SegmentedToggleStyle = SegmentedToggleStyle.Primary
 ) {
+    val haptic = LocalHapticFeedback.current
     val isDark = isSystemInDarkTheme()
+    val verticalPadding = if (compact) 6.dp else 10.dp
+    val textStyle = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium
+    val containerColor = when (style) {
+        SegmentedToggleStyle.Primary -> MaterialTheme.colorScheme.surfaceVariant
+        SegmentedToggleStyle.Secondary -> MaterialTheme.colorScheme.surface
+    }
+    val selectedColors = when (style) {
+        SegmentedToggleStyle.Primary -> when {
+            isDark -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.onPrimary
+            else -> FabDark to Color.White
+        }
+        SegmentedToggleStyle.Secondary -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(PillShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(containerColor)
+            .then(
+                if (style == SegmentedToggleStyle.Secondary) {
+                    Modifier.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), PillShape)
+                } else {
+                    Modifier
+                }
+            )
             .padding(4.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -171,25 +207,20 @@ fun SegmentedToggle(
                         .weight(1f)
                         .clip(PillShape)
                         .background(
-                            when {
-                                selected && isDark -> MaterialTheme.colorScheme.primary
-                                selected -> FabDark
-                                else -> Color.Transparent
-                            }
+                            if (selected) selectedColors.first else Color.Transparent
                         )
-                        .clickable { onSelect(index) }
-                        .padding(vertical = 10.dp),
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelect(index)
+                        }
+                        .padding(vertical = verticalPadding),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = textStyle,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = when {
-                            selected && isDark -> MaterialTheme.colorScheme.onPrimary
-                            selected -> Color.White
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        color = if (selected) selectedColors.second else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -207,7 +238,8 @@ fun TransactionRow(
     onClick: () -> Unit = {},
     onDelete: () -> Unit = {},
     showDeleteButton: Boolean = true,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    categoriesById: Map<Long, CategoryData> = emptyMap()
 ) {
     Row(
         modifier = modifier
@@ -226,7 +258,7 @@ fun TransactionRow(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = category?.name ?: "Без категории",
+                text = category?.displayName(categoriesById) ?: "Без категории",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -235,7 +267,13 @@ fun TransactionRow(
             text = MoneyFormatter.format(transaction.money, showSign = true, type = transaction.type),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
-            color = if (transaction.type == TransactionType.INCOME) incomeColor else expenseColor
+            color = if (transaction.type == TransactionType.INCOME) incomeColor else expenseColor,
+            modifier = Modifier.semantics {
+                contentDescription = when (transaction.type) {
+                    TransactionType.INCOME -> "Доход ${MoneyFormatter.format(transaction.money, showSign = false)}"
+                    TransactionType.EXPENSE -> "Расход ${MoneyFormatter.format(transaction.money, showSign = false)}"
+                }
+            }
         )
         if (showDeleteButton) {
             IconButton(onClick = onDelete) {
@@ -262,6 +300,7 @@ fun DayGroupCard(
     modifier: Modifier = Modifier,
     showDeleteButton: Boolean = true
 ) {
+    val categoriesById = categories.associateBy { it.id }
     WalletSurfaceCard(modifier = modifier) {
         dayGroups.forEachIndexed { groupIndex, (dayLabel, transactions) ->
             if (groupIndex > 0) {
@@ -287,7 +326,8 @@ fun DayGroupCard(
                     expenseColor = expenseColor,
                     onClick = { onTransactionClick(tx) },
                     onDelete = { onTransactionDelete(tx) },
-                    showDeleteButton = showDeleteButton
+                    showDeleteButton = showDeleteButton,
+                    categoriesById = categoriesById
                 )
             }
         }
@@ -322,7 +362,7 @@ fun SettingsRow(
             ) {
                 Icon(
                     imageVector = it,
-                    contentDescription = null,
+                    contentDescription = title,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp)
                 )
@@ -358,6 +398,87 @@ fun SettingsRow(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun SectionLabel(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun StatCard(
+    label: String,
+    value: String,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = CardShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = accentColor
+            )
+        }
+    }
+}
+
+@Composable
+fun NumberedAdviceCard(
+    number: Int,
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    WalletSurfaceCard(modifier = modifier) {
+        Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = number.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
             )
         }
     }
