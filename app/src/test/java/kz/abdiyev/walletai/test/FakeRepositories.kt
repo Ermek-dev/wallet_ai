@@ -3,6 +3,10 @@ package kz.abdiyev.walletai.test
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.model.TransactionData
+import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.domain.port.CategoryStore
+import kz.abdiyev.walletai.domain.port.MerchantRuleStore
+import kz.abdiyev.walletai.domain.port.TransactionStore
 import kz.abdiyev.walletai.domain.repository.AdviceRepository
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.MerchantRuleRepository
@@ -12,7 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 
-class FakeTransactionRepository : TransactionRepository {
+class FakeTransactionRepository : TransactionRepository, TransactionStore {
     private val items = mutableListOf<TransactionData>()
     private val flow = MutableStateFlow<List<TransactionData>>(emptyList())
 
@@ -52,13 +56,42 @@ class FakeTransactionRepository : TransactionRepository {
         items.clear()
         flow.value = emptyList()
     }
+
+    override suspend fun sumByType(
+        type: TransactionType,
+        startInclusive: Long?,
+        endExclusive: Long?
+    ): Long = filtered(type, startInclusive, endExclusive).sumOf { it.money.amountMinor }
+
+    override suspend fun sumByCategoryGrouped(
+        type: TransactionType,
+        startInclusive: Long?,
+        endExclusive: Long?
+    ): Map<Long, Long> = filtered(type, startInclusive, endExclusive)
+        .groupBy { it.categoryId }
+        .mapValues { (_, txs) -> txs.sumOf { it.money.amountMinor } }
+
+    override suspend fun countAll(): Int = items.size
+
+    override suspend fun countInPeriod(startInclusive: Long, endExclusive: Long): Int =
+        items.count { it.date >= startInclusive && it.date < endExclusive }
+
+    private fun filtered(
+        type: TransactionType,
+        startInclusive: Long?,
+        endExclusive: Long?
+    ): List<TransactionData> = items.filter { tx ->
+        tx.type == type &&
+            (startInclusive == null || tx.date >= startInclusive) &&
+            (endExclusive == null || tx.date < endExclusive)
+    }
 }
 
 class FakeCategoryRepository(
     initial: List<CategoryData> = listOf(
         CategoryData(1, "Продукты", kz.abdiyev.walletai.domain.model.TransactionType.EXPENSE, "#EF5350", "shopping_cart")
     )
-) : CategoryRepository {
+) : CategoryRepository, CategoryStore {
     private val items = initial.toMutableList()
     private val flow = MutableStateFlow(items.toList())
 
@@ -66,7 +99,11 @@ class FakeCategoryRepository(
 
     override suspend fun getAll(): List<CategoryData> = items.toList()
 
-    override suspend fun ensureDefaultCategories() = Unit
+    override suspend fun ensureDefaultCategories() {
+        if (items.isEmpty()) {
+            insert(CategoryData(1, "Продукты", TransactionType.EXPENSE, "#EF5350", "shopping_cart"))
+        }
+    }
 
     override suspend fun insert(category: CategoryData): Long {
         val id = (items.maxOfOrNull { it.id } ?: 0L) + 1
@@ -92,7 +129,7 @@ class FakeSettingsRepository : SettingsRepository {
     }
 }
 
-class FakeMerchantRuleRepository : MerchantRuleRepository {
+class FakeMerchantRuleRepository : MerchantRuleRepository, MerchantRuleStore {
     override suspend fun findCategoryId(description: String): Long? = null
     override suspend fun saveRule(merchantPattern: String, categoryId: Long) = Unit
 }

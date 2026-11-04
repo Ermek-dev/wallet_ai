@@ -29,7 +29,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -37,6 +40,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kz.abdiyev.walletai.ui.components.TiltGlowProvider
+import kz.abdiyev.walletai.ui.components.rememberDynamicTiltOffset
+import kz.abdiyev.walletai.ui.components.tiltGlow
 import kz.abdiyev.walletai.ui.navigation.WalletAiRoutes
 import kz.abdiyev.walletai.ui.screens.AdvisorScreen
 import kz.abdiyev.walletai.ui.screens.AnalyticsScreen
@@ -53,6 +59,7 @@ import kz.abdiyev.walletai.ui.viewmodel.HistoryViewModel
 import kz.abdiyev.walletai.ui.viewmodel.ImportViewModel
 import kz.abdiyev.walletai.ui.viewmodel.ProfileViewModel
 import org.koin.androidx.compose.koinViewModel
+import kz.abdiyev.walletai.R
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,6 +88,14 @@ fun MainAppScreen() {
     val settings by profileViewModel.settings.collectAsStateWithLifecycle()
     val profileSaveMessage by profileViewModel.saveMessage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val haptic = LocalHapticFeedback.current
+
+    val deletedMessage = stringResource(R.string.snackbar_transaction_deleted)
+    val undoLabel = stringResource(R.string.snackbar_undo)
+    val saveFailedMessage = stringResource(R.string.snackbar_save_failed)
+    val voiceAmountMissingMessage = stringResource(R.string.snackbar_voice_amount_missing)
+    val editLabel = stringResource(R.string.snackbar_edit)
+    val savedMessage = stringResource(R.string.snackbar_saved)
 
     val showBottomBar = currentRoute in WalletAiRoutes.mainTabs
 
@@ -89,17 +104,18 @@ fun MainAppScreen() {
             when (event) {
                 is DashboardEvent.Deleted -> {
                     val result = snackbarHostState.showSnackbar(
-                        message = "Транзакция удалена",
-                        actionLabel = "Отменить"
+                        message = deletedMessage,
+                        actionLabel = undoLabel
                     )
                     if (result == SnackbarResult.ActionPerformed) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         dashboardViewModel.undoDelete(event.transaction)
                     }
                 }
-                DashboardEvent.SaveError -> snackbarHostState.showSnackbar("Не удалось сохранить операцию")
+                DashboardEvent.SaveError -> snackbarHostState.showSnackbar(saveFailedMessage)
                 DashboardEvent.VoiceAmountMissing -> snackbarHostState.showSnackbar(
-                    message = "Не удалось определить сумму — отредактируйте операцию вручную",
-                    actionLabel = "Редактировать"
+                    message = voiceAmountMissingMessage,
+                    actionLabel = editLabel
                 )
                 is DashboardEvent.Info -> snackbarHostState.showSnackbar(event.text)
             }
@@ -108,12 +124,14 @@ fun MainAppScreen() {
 
     LaunchedEffect(profileSaveMessage) {
         if (profileSaveMessage == "saved") {
-            snackbarHostState.showSnackbar("Сохранено")
+            snackbarHostState.showSnackbar(savedMessage)
             profileViewModel.clearSaveMessage()
         }
     }
 
-    WalletAiTheme(themeMode = settings.themeMode) {
+    WalletAiTheme(themeMode = settings.themeMode, dynamicColor = settings.dynamicColor) {
+        val tiltOffset = rememberDynamicTiltOffset(settings.dynamicEffects)
+        TiltGlowProvider(tiltOffset) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = MaterialTheme.colorScheme.background,
@@ -121,6 +139,7 @@ fun MainAppScreen() {
             bottomBar = {
                 if (showBottomBar) {
                     NavigationBar(
+                        modifier = Modifier.tiltGlow(intensity = 0.15f, maxShiftDp = 4.dp),
                         containerColor = MaterialTheme.colorScheme.background,
                         tonalElevation = 0.dp
                     ) {
@@ -141,9 +160,9 @@ fun MainAppScreen() {
                                 }
                             },
                             icon = {
-                                Icon(Icons.Default.Dashboard, contentDescription = "Учёт", modifier = Modifier.size(22.dp))
+                                Icon(Icons.Default.Dashboard, contentDescription = stringResource(R.string.nav_dashboard), modifier = Modifier.size(22.dp))
                             },
-                            label = { Text("Учёт") },
+                            label = { Text(stringResource(R.string.nav_dashboard)) },
                             colors = itemColors
                         )
                         NavigationBarItem(
@@ -156,9 +175,9 @@ fun MainAppScreen() {
                                 }
                             },
                             icon = {
-                                Icon(Icons.Default.Analytics, contentDescription = "Аналитика", modifier = Modifier.size(22.dp))
+                                Icon(Icons.Default.Analytics, contentDescription = stringResource(R.string.nav_analytics), modifier = Modifier.size(22.dp))
                             },
-                            label = { Text("Аналитика") },
+                            label = { Text(stringResource(R.string.nav_analytics)) },
                             colors = itemColors
                         )
                         NavigationBarItem(
@@ -171,9 +190,9 @@ fun MainAppScreen() {
                                 }
                             },
                             icon = {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = "Советник", modifier = Modifier.size(22.dp))
+                                Icon(Icons.Default.AutoAwesome, contentDescription = stringResource(R.string.nav_advisor), modifier = Modifier.size(22.dp))
                             },
-                            label = { Text("ИИ") },
+                            label = { Text(stringResource(R.string.nav_advisor)) },
                             colors = itemColors
                         )
                         NavigationBarItem(
@@ -186,9 +205,9 @@ fun MainAppScreen() {
                                 }
                             },
                             icon = {
-                                Icon(Icons.Default.Person, contentDescription = "Профиль", modifier = Modifier.size(22.dp))
+                                Icon(Icons.Default.Person, contentDescription = stringResource(R.string.nav_profile), modifier = Modifier.size(22.dp))
                             },
-                            label = { Text("Профиль") },
+                            label = { Text(stringResource(R.string.nav_profile)) },
                             colors = itemColors
                         )
                     }
@@ -245,6 +264,7 @@ fun MainAppScreen() {
                     }
                 }
             }
+        }
         }
     }
 }

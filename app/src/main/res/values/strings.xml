@@ -1,3 +1,73 @@
 <resources>
     <string name="app_name">WalletAI</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">Учёт</string>
+    <string name="nav_analytics">Аналитика</string>
+    <string name="nav_advisor">ИИ</string>
+    <string name="nav_profile">Профиль</string>
+
+    <!-- Snackbars / actions -->
+    <string name="snackbar_transaction_deleted">Транзакция удалена</string>
+    <string name="snackbar_undo">Отменить</string>
+    <string name="snackbar_save_failed">Не удалось сохранить операцию</string>
+    <string name="snackbar_voice_amount_missing">Не удалось определить сумму — отредактируйте операцию вручную</string>
+    <string name="snackbar_edit">Редактировать</string>
+    <string name="snackbar_saved">Сохранено</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_balance">Баланс</string>
+    <string name="dashboard_empty_period">Нет операций за период</string>
+    <string name="dashboard_clean_start">Чистый старт</string>
+    <string name="voice_stop">Остановить запись</string>
+    <string name="voice_input">Голосовой ввод</string>
+    <string name="action_add">Добавить операцию</string>
+
+    <!-- History -->
+    <string name="history_search">Поиск</string>
+    <string name="history_search_hint">Поиск по описанию</string>
+    <string name="history_empty">Нет операций</string>
+    <string name="history_back">Назад</string>
+
+    <!-- Analytics -->
+    <string name="analytics_export">Экспорт</string>
+    <string name="analytics_empty">Нет данных за период</string>
+
+    <!-- Import -->
+    <string name="import_success_title">Готово</string>
+    <string name="import_success_message">Сохранено %1$d операций</string>
+    <string name="action_ok">Ок</string>
+
+    <!-- Add operation dialog -->
+    <string name="add_op_voice_hint">Скажите: «Продукты в Магнуме 4500»</string>
+    <string name="add_op_date">Дата</string>
+    <string name="add_op_today">Сегодня</string>
+    <string name="add_op_yesterday">Вчера</string>
+    <string name="add_op_pick_date">Выбрать</string>
+    <string name="add_op_more">Ещё…</string>
+    <string name="add_op_category">Категория</string>
+    <string name="add_op_description">Описание (необязательно)</string>
+    <string name="add_op_cta_expense">Добавить расход · %1$s</string>
+    <string name="add_op_cta_income">Добавить доход · %1$s</string>
+    <string name="add_op_cta_save">Сохранить · %1$s</string>
+    <string name="add_op_amount_error">Введите сумму больше нуля</string>
+
+    <!-- Advisor -->
+    <string name="advisor_title">ИИ-советник</string>
+    <string name="advisor_subtitle">Groq · анализ за %1$s</string>
+    <string name="advisor_refresh">Обновить</string>
+    <string name="advisor_income">Доходы</string>
+    <string name="advisor_expense">Расходы</string>
+    <string name="advisor_savings">Сбережения</string>
+    <string name="advisor_section_analysis">АНАЛИЗ</string>
+    <string name="advisor_section_tips">СОВЕТЫ</string>
+    <string name="advisor_get_analysis">Получить полный ИИ-анализ</string>
+    <string name="advisor_local_report">Локальный отчёт без сети</string>
+
+    <!-- Common -->
+    <string name="action_delete">Удалить</string>
+    <string name="action_edit">Редактировать</string>
+    <string name="action_confirm">Подтвердить</string>
+    <string name="category_other">Прочее</string>
+    <string name="category_none">Без категории</string>
 </resources>

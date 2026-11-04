@@ -61,11 +61,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kz.abdiyev.walletai.R
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Currency
 import kz.abdiyev.walletai.domain.model.Money
@@ -75,11 +77,13 @@ import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.ui.components.BalanceSummaryRow
 import kz.abdiyev.walletai.ui.components.DayGroupCard
 import kz.abdiyev.walletai.ui.components.HiddenByPeriodHint
+import kz.abdiyev.walletai.ui.components.WalletEmptyState
 import kz.abdiyev.walletai.ui.components.MonthHeader
 import kz.abdiyev.walletai.ui.components.PeriodRangePickerDialog
 import kz.abdiyev.walletai.ui.components.SegmentedPeriodSelector
 import kz.abdiyev.walletai.ui.components.TransactionRow
 import kz.abdiyev.walletai.ui.components.WalletSurfaceCard
+import kz.abdiyev.walletai.ui.components.tiltGlow
 import kz.abdiyev.walletai.ui.components.getCategoryIcon
 import kz.abdiyev.walletai.ui.theme.FabDark
 import kz.abdiyev.walletai.ui.theme.FabShape
@@ -239,7 +243,7 @@ fun DashboardScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Баланс",
+                        text = stringResource(R.string.dashboard_balance),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -354,29 +358,19 @@ fun DashboardScreen(
 
             if (filteredTransactions.isEmpty()) {
                 item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(30.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text(
-                                text = "Нет операций за период",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                            if (hiddenByPeriodCount > 0) {
+                    WalletEmptyState(
+                        message = stringResource(R.string.dashboard_empty_period),
+                        footer = if (hiddenByPeriodCount > 0) {
+                            {
                                 HiddenByPeriodHint(
                                     hiddenCount = hiddenByPeriodCount,
                                     onShowAll = { viewModel.setPeriod(Period.ALL) }
                                 )
                             }
+                        } else {
+                            null
                         }
-                    }
+                    )
                 }
             } else {
                 item {
@@ -405,6 +399,7 @@ fun DashboardScreen(
                 onClick = {
                     if (isListening) voiceHelper?.stopListening() else startVoiceInput()
                 },
+                modifier = Modifier.tiltGlow(shape = FabShape, intensity = 0.25f, maxShiftDp = 6.dp),
                 containerColor = if (isListening) {
                     MaterialTheme.colorScheme.errorContainer
                 } else {
@@ -413,11 +408,12 @@ fun DashboardScreen(
             ) {
                 Icon(
                     imageVector = if (isListening) Icons.Default.Close else Icons.Default.Mic,
-                    contentDescription = if (isListening) "Остановить запись" else "Голосовой ввод"
+                    contentDescription = if (isListening) stringResource(R.string.voice_stop) else stringResource(R.string.voice_input)
                 )
             }
             FloatingActionButton(
                 onClick = { showAddDialog = true },
+                modifier = Modifier.tiltGlow(shape = FabShape, intensity = 0.3f),
                 shape = FabShape,
                 containerColor = if (isDark) MaterialTheme.colorScheme.primary else FabDark,
                 contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
@@ -569,7 +565,7 @@ private fun VoicePreviewCard(
             horizontalArrangement = Arrangement.End
         ) {
             TextButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Edit, contentDescription = "Редактировать", modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Изменить")
             }
@@ -580,7 +576,7 @@ private fun VoicePreviewCard(
                 enabled = canCommit,
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Check, contentDescription = "Подтвердить", modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Сохранить")
             }

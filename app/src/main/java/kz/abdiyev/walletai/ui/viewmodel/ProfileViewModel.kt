@@ -95,6 +95,14 @@ class ProfileViewModel(
         viewModelScope.launch { settingsRepository.update { it.copy(biometricEnabled = enabled) } }
     }
 
+    fun setDynamicEffects(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.update { it.copy(dynamicEffects = enabled) } }
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.update { it.copy(dynamicColor = enabled) } }
+    }
+
     fun saveCategory(category: CategoryData) {
         viewModelScope.launch(Dispatchers.IO) {
             if (category.id == 0L) categoryRepository.insert(category)

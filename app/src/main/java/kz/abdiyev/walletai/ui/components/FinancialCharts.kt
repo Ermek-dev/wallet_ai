@@ -7,8 +7,12 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 
 import androidx.compose.foundation.Canvas
-
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Icon
 
 import androidx.compose.foundation.layout.Arrangement
 
@@ -44,8 +48,8 @@ import androidx.compose.runtime.getValue
 
 import androidx.compose.runtime.mutableFloatStateOf
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-
 import androidx.compose.runtime.setValue
 
 import androidx.compose.ui.Alignment
@@ -64,6 +68,10 @@ import androidx.compose.ui.graphics.StrokeCap
 
 import androidx.compose.ui.graphics.drawscope.Stroke
 
+import androidx.compose.ui.semantics.contentDescription
+
+import androidx.compose.ui.semantics.semantics
+
 import androidx.compose.ui.text.font.FontWeight
 
 import androidx.compose.ui.unit.dp
@@ -79,15 +87,11 @@ import kz.abdiyev.walletai.util.MoneyFormatter
 
 
 data class CategoryShare(
-
     val category: CategoryData,
-
     val amountMinor: Long,
-
     val percentage: Float,
-
-    val color: Color
-
+    val color: Color,
+    val subShares: List<CategoryShare> = emptyList()
 )
 
 
@@ -132,7 +136,12 @@ fun DonutChart(
 
 
 
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    Box(
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = "Диаграмма: $centerLabel. Итого $totalText"
+        },
+        contentAlignment = Alignment.Center
+    ) {
 
         Canvas(modifier = Modifier.size(180.dp).padding(8.dp)) {
 
@@ -221,81 +230,99 @@ fun DonutChart(
 
 
 @Composable
-
 fun CategoryRankingList(
-
     shares: List<CategoryShare>,
-
     currency: Currency,
-
     amountColor: Color,
-
     modifier: Modifier = Modifier
-
 ) {
+    var expandedIds by remember(shares) { mutableStateOf(setOf<Long>()) }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-
         shares.forEach { share ->
+            val expandable = share.subShares.isNotEmpty()
+            val expanded = share.category.id in expandedIds
 
-            Row(
+            CategoryRankingRow(
+                share = share,
+                amountColor = amountColor,
+                currency = currency,
+                trailing = if (expandable) {
+                    {
+                        Icon(
+                            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (expanded) "Свернуть" else "Развернуть",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    null
+                },
+                modifier = if (expandable) {
+                    Modifier.clickable {
+                        expandedIds = if (expanded) {
+                            expandedIds - share.category.id
+                        } else {
+                            expandedIds + share.category.id
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+            )
 
-                modifier = Modifier.fillMaxWidth(),
-
-                verticalAlignment = Alignment.CenterVertically
-
-            ) {
-
-                CategoryBadge(
-                    category = share.category,
-                    color = share.color,
-                    size = 32.dp
-                )
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Text(
-
-                    text = share.category.name,
-
-                    style = MaterialTheme.typography.bodyMedium,
-
-                    modifier = Modifier.weight(1f),
-
-                    color = MaterialTheme.colorScheme.onSurface
-
-                )
-
-                Text(
-
-                    text = "${share.percentage.toInt()}%",
-
-                    style = MaterialTheme.typography.bodySmall,
-
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Text(
-
-                    text = MoneyFormatter.format(Money(share.amountMinor, currency), showSign = false),
-
-                    style = MaterialTheme.typography.bodyMedium,
-
-                    fontWeight = FontWeight.SemiBold,
-
-                    color = amountColor
-
-                )
-
+            if (expanded) {
+                share.subShares.forEach { sub ->
+                    CategoryRankingRow(
+                        share = sub,
+                        amountColor = amountColor,
+                        currency = currency,
+                        modifier = Modifier.padding(start = 24.dp)
+                    )
+                }
             }
-
         }
-
     }
+}
 
+@Composable
+private fun CategoryRankingRow(
+    share: CategoryShare,
+    amountColor: Color,
+    currency: Currency,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CategoryBadge(
+            category = share.category,
+            color = share.color,
+            size = 32.dp
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = share.category.name,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = "${share.percentage.toInt()}%",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = MoneyFormatter.format(Money(share.amountMinor, currency), showSign = false),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = amountColor
+        )
+        trailing?.invoke()
+    }
 }
 
 

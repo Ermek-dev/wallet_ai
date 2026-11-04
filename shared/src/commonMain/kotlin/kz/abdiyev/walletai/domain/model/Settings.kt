@@ -9,5 +9,7 @@ data class Settings(
     val notificationsEnabled: Boolean = false,
     val notificationHour: Int = 21,
     val notificationMinute: Int = 0,
-    val biometricEnabled: Boolean = false
+    val biometricEnabled: Boolean = false,
+    val dynamicEffects: Boolean = true,
+    val dynamicColor: Boolean = false
 )

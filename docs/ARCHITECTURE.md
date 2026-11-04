@@ -46,10 +46,12 @@ UI (Compose-экраны)  ──собирает StateFlow──  ViewModel (п
 
 | Пакет | Содержимое |
 |---|---|
-| `domain/model` | `Money`, `Currency`, `TransactionType`, `Period`, `Settings`, `TransactionData`, `CategoryData` |
+| `domain/model` | `Money`, `Currency`, `TransactionType`, `Period`, `Settings`, `TransactionData`, `CategoryData` (`parentId`) |
+| `domain/category` | `CategoryHierarchyValidator`, `CategoryRollup` — подкатегории (глубина ≤ 1) |
 | `ml` | `TransactionClassifier`, `BankStatementParser`, `VoiceInputParser`, парсеры Kaspi/Freedom |
 | `ai` | `AdviceAiClient`, `GroqClient`, `AiErrorMapper`, `AdviceCachePolicy` |
 | `util` | `MoneyFormatter`, `PeriodFilter`, `CalendarMillis`, `DescriptionNormalizer`, `ReminderDelayCalculator` |
+| `ui` | `TiltMath`, `TiltOffset` — математика наклона для UI-эффектов (без Android) |
 
 Правило: код здесь не знает про Android (`Context`, `Log`, `android.*` запрещены).
 
@@ -68,6 +70,8 @@ UI (Compose-экраны)  ──собирает StateFlow──  ViewModel (п
 **Экспорт:** `Exporter` → `ShareHelper` (FileProvider).
 
 **Уведомления:** `ReminderScheduler` + `ReminderWorker` (WorkManager, приблизительное время без exact alarm); `notificationHour` + `notificationMinute` в Settings; перепланирование при старте (`ReminderBootstrap`).
+
+**Динамическое свечение (tilt glow):** `TiltSensorMonitor` (Android, `SensorManager`) → `TiltMath` в shared → `StateFlow<TiltOffset>` → `LocalTiltOffset` + `Modifier.tiltGlow` на карточках/FAB/NavigationBar; тумблер `Settings.dynamicEffects`, отключение при `ANIMATOR_DURATION_SCALE == 0`.
 
 ## Данные
 

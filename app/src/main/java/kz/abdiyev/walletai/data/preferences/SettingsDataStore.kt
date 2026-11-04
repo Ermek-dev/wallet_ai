@@ -26,6 +26,8 @@ class SettingsDataStore(private val context: Context) {
         val NOTIFICATION_HOUR = intPreferencesKey("notification_hour")
         val NOTIFICATION_MINUTE = intPreferencesKey("notification_minute")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
+        val DYNAMIC_EFFECTS = booleanPreferencesKey("dynamic_effects")
+        val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     }
 
     val settings: Flow<Settings> = context.dataStore.data.map { prefs ->
@@ -38,7 +40,9 @@ class SettingsDataStore(private val context: Context) {
             notificationsEnabled = prefs[Keys.NOTIFICATIONS_ENABLED] ?: false,
             notificationHour = prefs[Keys.NOTIFICATION_HOUR] ?: 21,
             notificationMinute = prefs[Keys.NOTIFICATION_MINUTE] ?: 0,
-            biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false
+            biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false,
+            dynamicEffects = prefs[Keys.DYNAMIC_EFFECTS] ?: true,
+            dynamicColor = prefs[Keys.DYNAMIC_COLOR] ?: false
         )
     }
 
@@ -53,7 +57,9 @@ class SettingsDataStore(private val context: Context) {
                 notificationsEnabled = prefs[Keys.NOTIFICATIONS_ENABLED] ?: false,
                 notificationHour = prefs[Keys.NOTIFICATION_HOUR] ?: 21,
                 notificationMinute = prefs[Keys.NOTIFICATION_MINUTE] ?: 0,
-                biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false
+                biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false,
+                dynamicEffects = prefs[Keys.DYNAMIC_EFFECTS] ?: true,
+                dynamicColor = prefs[Keys.DYNAMIC_COLOR] ?: false
             )
             val updated = transform(current)
             prefs[Keys.CURRENCY] = updated.currencyCode
@@ -65,6 +71,8 @@ class SettingsDataStore(private val context: Context) {
             prefs[Keys.NOTIFICATION_HOUR] = updated.notificationHour
             prefs[Keys.NOTIFICATION_MINUTE] = updated.notificationMinute
             prefs[Keys.BIOMETRIC_ENABLED] = updated.biometricEnabled
+            prefs[Keys.DYNAMIC_EFFECTS] = updated.dynamicEffects
+            prefs[Keys.DYNAMIC_COLOR] = updated.dynamicColor
         }
     }
 }

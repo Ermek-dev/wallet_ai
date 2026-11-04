@@ -16,6 +16,9 @@ import kz.abdiyev.walletai.util.Exporter
 import org.koin.dsl.module
 
 val repositoryModule = module {
+    single<kz.abdiyev.walletai.domain.repository.ImportRepository> {
+        kz.abdiyev.walletai.data.repository.ImportRepositoryImpl(get())
+    }
     single<TransactionRepository> { TransactionRepositoryImpl(get()) }
     single<CategoryRepository> { CategoryRepositoryImpl(get(), get()) }
     single<SettingsRepository> { SettingsRepositoryImpl(get()) }

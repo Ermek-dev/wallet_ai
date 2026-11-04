@@ -4,22 +4,36 @@ import kz.abdiyev.walletai.ai.AdviceResult
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.model.TransactionData
+import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.domain.port.CategoryStore
+import kz.abdiyev.walletai.domain.port.MerchantRuleStore
+import kz.abdiyev.walletai.domain.port.TransactionStore
 import kotlinx.coroutines.flow.Flow
 
-interface TransactionRepository {
+interface TransactionRepository : TransactionStore {
     val transactions: Flow<List<TransactionData>>
-    suspend fun getAll(): List<TransactionData>
     fun search(query: String): Flow<List<TransactionData>>
-    suspend fun insert(transaction: TransactionData): Long
-    suspend fun insertAll(transactions: List<TransactionData>)
     suspend fun update(transaction: TransactionData)
     suspend fun delete(transaction: TransactionData)
     suspend fun deleteAll()
+    suspend fun sumByType(
+        type: TransactionType,
+        startInclusive: Long?,
+        endExclusive: Long?
+    ): Long
+
+    suspend fun sumByCategoryGrouped(
+        type: TransactionType,
+        startInclusive: Long?,
+        endExclusive: Long?
+    ): Map<Long, Long>
+
+    suspend fun countAll(): Int
+    suspend fun countInPeriod(startInclusive: Long, endExclusive: Long): Int
 }
 
-interface CategoryRepository {
+interface CategoryRepository : CategoryStore {
     val categories: Flow<List<CategoryData>>
-    suspend fun getAll(): List<CategoryData>
     suspend fun ensureDefaultCategories()
     suspend fun insert(category: CategoryData): Long
     suspend fun update(category: CategoryData)
@@ -48,10 +62,7 @@ interface AdviceRepository {
     ): AdviceResult.Fallback
 }
 
-interface MerchantRuleRepository {
-    suspend fun findCategoryId(description: String): Long?
-    suspend fun saveRule(merchantPattern: String, categoryId: Long)
-}
+interface MerchantRuleRepository : MerchantRuleStore
 
 /** Maintenance operations that need database-level access; keeps AppDatabase out of ViewModels. */
 interface MaintenanceRepository {

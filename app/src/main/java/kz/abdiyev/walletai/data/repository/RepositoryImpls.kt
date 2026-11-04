@@ -17,9 +17,14 @@ import kz.abdiyev.walletai.data.mapper.toEntity
 import kz.abdiyev.walletai.data.preferences.AdviceCacheDataStore
 import kz.abdiyev.walletai.data.preferences.AdviceCacheEntry
 import kz.abdiyev.walletai.data.preferences.SettingsDataStore
+import kz.abdiyev.walletai.domain.category.CategoryHierarchyValidator
 import kz.abdiyev.walletai.domain.model.CategoryData
 import kz.abdiyev.walletai.domain.model.Settings
 import kz.abdiyev.walletai.domain.model.TransactionData
+import kz.abdiyev.walletai.domain.model.TransactionType
+import kz.abdiyev.walletai.domain.port.CategoryStore
+import kz.abdiyev.walletai.domain.port.MerchantRuleStore
+import kz.abdiyev.walletai.domain.port.TransactionStore
 import kz.abdiyev.walletai.domain.repository.AdviceRepository
 import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.MaintenanceRepository
@@ -27,7 +32,8 @@ import kz.abdiyev.walletai.domain.repository.MerchantRuleRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
 import kz.abdiyev.walletai.domain.repository.TransactionRepository
 import kz.abdiyev.walletai.util.Clock
-import kz.abdiyev.walletai.util.MockDataProvider
+import kz.abdiyev.walletai.data.seed.DefaultCategories
+import kz.abdiyev.walletai.data.seed.DemoDataSeeder
 import kz.abdiyev.walletai.util.SystemClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -35,7 +41,7 @@ import timber.log.Timber
 
 class TransactionRepositoryImpl(
     private val dao: TransactionDao
-) : TransactionRepository {
+) : TransactionRepository, TransactionStore {
     override val transactions: Flow<List<TransactionData>> =
         dao.getAllTransactions().map { list -> list.map { it.toDomain() } }
 
@@ -53,7 +59,15 @@ class TransactionRepositoryImpl(
     }
 
     override suspend fun update(transaction: TransactionData) {
-        dao.updateTransaction(transaction.toEntity())
+        val original = dao.getById(transaction.id) ?: return
+        dao.updateTransaction(transaction.copy(
+            sourceKey = original.sourceKey,
+            merchantKey = original.merchantKey,
+            originalDescription = original.originalDescription,
+            importBatchId = original.importBatchId,
+            isAutoCategorized = false,
+            needsReview = false
+        ).toEntity())
     }
 
     override suspend fun delete(transaction: TransactionData) {
@@ -63,12 +77,44 @@ class TransactionRepositoryImpl(
     override suspend fun deleteAll() {
         dao.deleteAllTransactions()
     }
+
+    override suspend fun sumByType(
+        type: TransactionType,
+        startInclusive: Long?,
+        endExclusive: Long?
+    ): Long {
+        val typeName = type.name
+        return if (startInclusive != null && endExclusive != null) {
+            dao.sumByTypeInRange(typeName, startInclusive, endExclusive)
+        } else {
+            dao.sumAllByType(typeName)
+        }
+    }
+
+    override suspend fun sumByCategoryGrouped(
+        type: TransactionType,
+        startInclusive: Long?,
+        endExclusive: Long?
+    ): Map<Long, Long> {
+        val typeName = type.name
+        val rows = if (startInclusive != null && endExclusive != null) {
+            dao.sumByCategoryInRange(typeName, startInclusive, endExclusive)
+        } else {
+            dao.sumByCategoryAll(typeName)
+        }
+        return rows.associate { it.categoryId to it.totalMinor }
+    }
+
+    override suspend fun countAll(): Int = dao.countAll()
+
+    override suspend fun countInPeriod(startInclusive: Long, endExclusive: Long): Int =
+        dao.countInRange(startInclusive, endExclusive)
 }
 
 class CategoryRepositoryImpl(
     private val dao: CategoryDao,
     private val transactionDao: TransactionDao
-) : CategoryRepository {
+) : CategoryRepository, CategoryStore {
     override val categories: Flow<List<CategoryData>> =
         dao.getAllCategories().map { list -> list.map { it.toDomain() } }
 
@@ -76,18 +122,26 @@ class CategoryRepositoryImpl(
         dao.getAllCategoriesList().map { it.toDomain() }
 
     override suspend fun ensureDefaultCategories() {
-        MockDataProvider.seedDefaultCategories(dao)
+        val existingNames = dao.getAllCategoriesList().map { it.name }.toSet()
+        val missing = DefaultCategories.entities.filter { it.name !in existingNames }
+        if (missing.isNotEmpty()) {
+            dao.insertCategories(missing)
+        }
     }
 
-    override suspend fun insert(category: CategoryData): Long =
-        dao.insertCategory(category.toEntity())
+    override suspend fun insert(category: CategoryData): Long {
+        validateCategory(category)
+        return dao.insertCategory(category.toEntity())
+    }
 
     override suspend fun update(category: CategoryData) {
+        validateCategory(category)
         dao.updateCategory(category.toEntity())
     }
 
     override suspend fun delete(category: CategoryData) {
         if (category.isSystem) return
+        dao.orphanChildren(category.id)
         val other = getOtherCategory() ?: return
         transactionDao.reassignCategory(category.id, other.id)
         dao.deleteCategory(category.toEntity())
@@ -95,6 +149,12 @@ class CategoryRepositoryImpl(
 
     override suspend fun getOtherCategory(): CategoryData? =
         dao.getSystemCategoryByName("Другое")?.toDomain()
+
+    private suspend fun validateCategory(category: CategoryData) {
+        val all = getAll()
+        val error = CategoryHierarchyValidator.validate(category, all)
+        require(error == null) { "Invalid category hierarchy: $error" }
+    }
 }
 
 class SettingsRepositoryImpl(
@@ -191,10 +251,11 @@ class AdviceRepositoryImpl(
 }
 
 class MaintenanceRepositoryImpl(
-    private val db: AppDatabase
+    private val db: AppDatabase,
+    private val clock: Clock = SystemClock
 ) : MaintenanceRepository {
     override suspend fun loadDemoData() {
-        MockDataProvider.loadDemoTransactions(db.categoryDao(), db.transactionDao())
+        DemoDataSeeder.loadDemoTransactions(db.categoryDao(), db.transactionDao(), clock)
     }
 
     override suspend fun wipeAllData() {
@@ -204,11 +265,19 @@ class MaintenanceRepositoryImpl(
 
 class MerchantRuleRepositoryImpl(
     private val dao: MerchantRuleDao
-) : MerchantRuleRepository {
+) : MerchantRuleRepository, MerchantRuleStore {
     override suspend fun findCategoryId(description: String): Long? =
-        dao.findMatchingRule(description)?.categoryId
+        dao.findExact(kz.abdiyev.walletai.util.DescriptionNormalizer.normalize(description))?.categoryId
+
+    override suspend fun findMemory(pattern: String): kz.abdiyev.walletai.domain.model.MerchantMemory? =
+        dao.findExact(pattern)?.let {
+            kz.abdiyev.walletai.domain.model.MerchantMemory(it.merchantPattern, it.categoryId, it.displayName)
+        }
 
     override suspend fun saveRule(merchantPattern: String, categoryId: Long) {
-        dao.insertRule(MerchantRuleEntity(merchantPattern = merchantPattern.lowercase(), categoryId = categoryId))
+        val normalized = kz.abdiyev.walletai.util.DescriptionNormalizer.normalize(merchantPattern)
+        if (normalized.isBlank()) return
+        val previous = dao.findExact(normalized)
+        dao.insertRule(MerchantRuleEntity(id = previous?.id ?: 0, merchantPattern = normalized, categoryId = categoryId))
     }
 }
