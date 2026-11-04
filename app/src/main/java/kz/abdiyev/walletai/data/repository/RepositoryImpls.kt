@@ -59,7 +59,15 @@ class TransactionRepositoryImpl(
     }
 
     override suspend fun update(transaction: TransactionData) {
-        dao.updateTransaction(transaction.toEntity())
+        val original = dao.getById(transaction.id) ?: return
+        dao.updateTransaction(transaction.copy(
+            sourceKey = original.sourceKey,
+            merchantKey = original.merchantKey,
+            originalDescription = original.originalDescription,
+            importBatchId = original.importBatchId,
+            isAutoCategorized = false,
+            needsReview = false
+        ).toEntity())
     }
 
     override suspend fun delete(transaction: TransactionData) {
@@ -259,9 +267,17 @@ class MerchantRuleRepositoryImpl(
     private val dao: MerchantRuleDao
 ) : MerchantRuleRepository, MerchantRuleStore {
     override suspend fun findCategoryId(description: String): Long? =
-        dao.findMatchingRule(description)?.categoryId
+        dao.findExact(kz.abdiyev.walletai.util.DescriptionNormalizer.normalize(description))?.categoryId
+
+    override suspend fun findMemory(pattern: String): kz.abdiyev.walletai.domain.model.MerchantMemory? =
+        dao.findExact(pattern)?.let {
+            kz.abdiyev.walletai.domain.model.MerchantMemory(it.merchantPattern, it.categoryId, it.displayName)
+        }
 
     override suspend fun saveRule(merchantPattern: String, categoryId: Long) {
-        dao.insertRule(MerchantRuleEntity(merchantPattern = merchantPattern.lowercase(), categoryId = categoryId))
+        val normalized = kz.abdiyev.walletai.util.DescriptionNormalizer.normalize(merchantPattern)
+        if (normalized.isBlank()) return
+        val previous = dao.findExact(normalized)
+        dao.insertRule(MerchantRuleEntity(id = previous?.id ?: 0, merchantPattern = normalized, categoryId = categoryId))
     }
 }

@@ -4,6 +4,25 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 object DatabaseMigrations {
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE transactions ADD COLUMN sourceKey TEXT")
+            db.execSQL("ALTER TABLE transactions ADD COLUMN merchantKey TEXT")
+            db.execSQL("ALTER TABLE transactions ADD COLUMN originalDescription TEXT")
+            db.execSQL("ALTER TABLE transactions ADD COLUMN importBatchId INTEGER")
+            db.execSQL("ALTER TABLE transactions ADD COLUMN needsReview INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE merchant_rules ADD COLUMN displayName TEXT")
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS import_batches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    sourceLabel TEXT NOT NULL, createdAt INTEGER NOT NULL,
+                    addedCount INTEGER NOT NULL, skippedCount INTEGER NOT NULL,
+                    reviewCount INTEGER NOT NULL, undone INTEGER NOT NULL
+                )
+            """.trimIndent())
+        }
+    }
+
     val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL(

@@ -40,6 +40,11 @@ interface CategoryDao {
 
 @Dao
 interface TransactionDao {
+    @Query("SELECT * FROM transactions WHERE id = :id")
+    suspend fun getById(id: Long): TransactionEntity?
+
+    @Query("DELETE FROM transactions WHERE importBatchId = :batchId")
+    suspend fun deleteBatch(batchId: Long)
     @Query("SELECT * FROM transactions ORDER BY date DESC")
     fun getAllTransactions(): Flow<List<TransactionEntity>>
 
@@ -122,4 +127,19 @@ interface MerchantRuleDao {
 
     @Query("SELECT * FROM merchant_rules WHERE :description LIKE '%' || merchantPattern || '%' LIMIT 1")
     suspend fun findMatchingRule(description: String): MerchantRuleEntity?
+
+    @Query("SELECT * FROM merchant_rules WHERE merchantPattern = :pattern ORDER BY id DESC LIMIT 1")
+    suspend fun findExact(pattern: String): MerchantRuleEntity?
+}
+
+@Dao
+interface ImportBatchDao {
+    @Query("SELECT * FROM import_batches ORDER BY id DESC")
+    fun observe(): Flow<List<ImportBatchEntity>>
+
+    @Insert
+    suspend fun insert(batch: ImportBatchEntity): Long
+
+    @Query("UPDATE import_batches SET undone = 1 WHERE id = :id")
+    suspend fun markUndone(id: Long)
 }

@@ -35,7 +35,12 @@ fun TransactionEntity.toDomain(): TransactionData = TransactionData(
     categoryId = categoryId,
     description = description,
     date = date,
-    isAutoCategorized = isAutoCategorized
+    isAutoCategorized = isAutoCategorized,
+    sourceKey = sourceKey,
+    merchantKey = merchantKey,
+    originalDescription = originalDescription,
+    importBatchId = importBatchId,
+    needsReview = needsReview
 )
 
 fun TransactionData.toEntity(): TransactionEntity = TransactionEntity(
@@ -46,5 +51,10 @@ fun TransactionData.toEntity(): TransactionEntity = TransactionEntity(
     categoryId = categoryId,
     description = description,
     date = date,
-    isAutoCategorized = isAutoCategorized
+    isAutoCategorized = isAutoCategorized,
+    sourceKey = sourceKey,
+    merchantKey = merchantKey,
+    originalDescription = originalDescription,
+    importBatchId = importBatchId,
+    needsReview = needsReview
 )

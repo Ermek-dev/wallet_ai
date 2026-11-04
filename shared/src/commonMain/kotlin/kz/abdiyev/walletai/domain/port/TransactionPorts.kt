@@ -12,6 +12,8 @@ interface TransactionStore {
 interface MerchantRuleStore {
     suspend fun findCategoryId(description: String): Long?
     suspend fun saveRule(merchantPattern: String, categoryId: Long)
+    suspend fun findMemory(pattern: String): kz.abdiyev.walletai.domain.model.MerchantMemory? =
+        findCategoryId(pattern)?.let { kz.abdiyev.walletai.domain.model.MerchantMemory(pattern, it) }
 }
 
 interface CategoryStore {
