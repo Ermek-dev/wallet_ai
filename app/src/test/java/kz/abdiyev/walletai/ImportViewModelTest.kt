@@ -5,7 +5,6 @@ import kz.abdiyev.walletai.domain.model.Money
 import kz.abdiyev.walletai.domain.model.TransactionData
 import kz.abdiyev.walletai.domain.model.TransactionType
 import kz.abdiyev.walletai.domain.usecase.ImportStatementUseCase
-import kz.abdiyev.walletai.domain.usecase.SaveTransactionUseCase
 import kz.abdiyev.walletai.ml.BankStatementParser
 import kz.abdiyev.walletai.ml.TransactionClassifier
 import kz.abdiyev.walletai.test.FakeCategoryRepository
@@ -46,24 +45,41 @@ class ImportViewModelTest {
             transactionRepository = transactionRepo,
             categoryRepository = FakeCategoryRepository(categories),
             settingsRepository = FakeSettingsRepository(),
-            merchantRuleRepository = FakeMerchantRuleRepository(),
             classifier = TransactionClassifier(),
             importStatementUseCase = ImportStatementUseCase(
                 transactionRepo,
                 FakeMerchantRuleRepository(),
                 BankStatementParser()
             ),
-            saveTransactionUseCase = SaveTransactionUseCase(
-                transactionRepo,
-                FakeMerchantRuleRepository(),
-                TransactionClassifier()
-            )
+            importRepository = kz.abdiyev.walletai.test.FakeImportRepository(transactionRepo),
+            workerDispatcher = testDispatcher
         )
     }
 
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun freshInstallInitializesCategoriesBeforeParsing() = runTest {
+        val emptyCategories = FakeCategoryRepository(emptyList())
+        val freshViewModel = ImportViewModel(
+            transactionRepository = transactionRepo,
+            categoryRepository = emptyCategories,
+            settingsRepository = FakeSettingsRepository(),
+            classifier = TransactionClassifier(),
+            importStatementUseCase = ImportStatementUseCase(
+                transactionRepo, FakeMerchantRuleRepository(), BankStatementParser()
+            ),
+            importRepository = kz.abdiyev.walletai.test.FakeImportRepository(transactionRepo),
+            workerDispatcher = testDispatcher
+        )
+        freshViewModel.parseBankStatement("www.kaspi.kz\n29.06.26 - 15,00 ₸ Покупка Живая Вода")
+        advanceUntilIdle()
+        assertTrue(freshViewModel.uiState.value is ImportUiState.Preview)
+        assertEquals(1, freshViewModel.parsedPreviews.value.size)
+        assertTrue(emptyCategories.getAll().isNotEmpty())
     }
 
     @Test
@@ -145,5 +161,32 @@ class ImportViewModelTest {
 
         viewModel.acknowledgeSuccess()
         assertEquals(ImportUiState.Idle, viewModel.uiState.value)
+    }
+
+    @Test
+    fun renamedPurchaseIsRecognizedOnNextImport() = runTest {
+        val statement = "www.kaspi.kz\n29.06.26 - 15,00 ₸ Покупка Живая Вода"
+        viewModel.parseBankStatement(statement)
+        advanceUntilIdle()
+        val first = viewModel.parsedPreviews.value.single()
+        viewModel.updatePreviewEdited(first.id, first.money, first.type, 1, "Мой магазин", first.date)
+        viewModel.commitPreviews()
+        advanceUntilIdle()
+        viewModel.acknowledgeSuccess()
+        viewModel.parseBankStatement(statement)
+        advanceUntilIdle()
+        assertTrue(viewModel.parsedPreviews.value.single().isDuplicate)
+        assertEquals("Мой магазин", transactionRepo.getAll().single().description)
+    }
+
+    @Test
+    fun categoryCorrectionOnlyChangesOnePurchaseUntilRemembered() = runTest {
+        viewModel.parseBankStatement("www.kaspi.kz\n29.06.26 - 15,00 ₸ Покупка Живая Вода\n30.06.26 - 20,00 ₸ Покупка Живая Вода")
+        advanceUntilIdle()
+        val first = viewModel.parsedPreviews.value.first()
+        viewModel.updatePreviewCategory(first.id, 10)
+        assertEquals(1, viewModel.parsedPreviews.value.count { it.categoryConfirmed })
+        viewModel.rememberMerchant(first.id)
+        assertTrue(viewModel.parsedPreviews.value.all { it.categoryConfirmed && it.rememberMerchant })
     }
 }
