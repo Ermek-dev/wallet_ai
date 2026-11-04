@@ -99,7 +99,11 @@ class FakeCategoryRepository(
 
     override suspend fun getAll(): List<CategoryData> = items.toList()
 
-    override suspend fun ensureDefaultCategories() = Unit
+    override suspend fun ensureDefaultCategories() {
+        if (items.isEmpty()) {
+            insert(CategoryData(1, "Продукты", TransactionType.EXPENSE, "#EF5350", "shopping_cart"))
+        }
+    }
 
     override suspend fun insert(category: CategoryData): Long {
         val id = (items.maxOfOrNull { it.id } ?: 0L) + 1

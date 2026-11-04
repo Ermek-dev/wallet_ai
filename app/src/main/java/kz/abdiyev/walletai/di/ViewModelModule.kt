@@ -11,13 +11,14 @@ import kz.abdiyev.walletai.util.Clock
 import kz.abdiyev.walletai.util.SystemClock
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModelOf
+import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 
 val viewModelModule = module {
     single<Clock> { SystemClock }
     single { ReminderScheduler(androidContext()) }
     viewModelOf(::DashboardViewModel)
-    viewModelOf(::ImportViewModel)
+    viewModel { ImportViewModel(get(), get(), get(), get(), get(), get(), get()) }
     viewModelOf(::HistoryViewModel)
     viewModelOf(::AnalyticsViewModel)
     viewModelOf(::AdvisorViewModel)

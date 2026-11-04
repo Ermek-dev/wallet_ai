@@ -8,6 +8,7 @@ import kz.abdiyev.walletai.domain.repository.CategoryRepository
 import kz.abdiyev.walletai.domain.repository.SettingsRepository
 import kz.abdiyev.walletai.domain.repository.TransactionRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +18,7 @@ import kotlinx.coroutines.flow.stateIn
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HistoryViewModel(
-    transactionRepository: TransactionRepository,
+    private val transactionRepository: TransactionRepository,
     categoryRepository: CategoryRepository,
     settingsRepository: SettingsRepository
 ) : ViewModel() {
@@ -34,5 +35,19 @@ class HistoryViewModel(
 
     fun setHistoryQuery(query: String) {
         _historyQuery.value = query
+    }
+
+    private val _saveError = MutableStateFlow(false)
+    val saveError = _saveError.asStateFlow()
+
+    fun updateTransaction(transaction: kz.abdiyev.walletai.domain.model.TransactionData) {
+        viewModelScope.launch {
+            try {
+                transactionRepository.update(transaction.copy(isAutoCategorized = false, needsReview = false))
+                _saveError.value = false
+            } catch (e: Exception) {
+                _saveError.value = true
+            }
+        }
     }
 }

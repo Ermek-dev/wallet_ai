@@ -6,14 +6,15 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [CategoryEntity::class, TransactionEntity::class, MerchantRuleEntity::class],
-    version = 4,
+    entities = [CategoryEntity::class, TransactionEntity::class, MerchantRuleEntity::class, ImportBatchEntity::class],
+    version = 5,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun categoryDao(): CategoryDao
     abstract fun transactionDao(): TransactionDao
     abstract fun merchantRuleDao(): MerchantRuleDao
+    abstract fun importBatchDao(): ImportBatchDao
 
     companion object {
         @Volatile
@@ -29,7 +30,8 @@ abstract class AppDatabase : RoomDatabase() {
                     .addMigrations(
                         DatabaseMigrations.MIGRATION_1_2,
                         DatabaseMigrations.MIGRATION_2_3,
-                        DatabaseMigrations.MIGRATION_3_4
+                        DatabaseMigrations.MIGRATION_3_4,
+                        DatabaseMigrations.MIGRATION_4_5
                     )
                     .build()
                     .also { INSTANCE = it }

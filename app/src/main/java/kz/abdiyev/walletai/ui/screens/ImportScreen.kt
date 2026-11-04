@@ -97,6 +97,12 @@ fun ImportScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val skipTransfers by viewModel.skipTransfers.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val accountLabel by viewModel.accountLabel.collectAsStateWithLifecycle()
+    val importHistory by viewModel.importHistory.collectAsStateWithLifecycle()
+    val batchTransactions by viewModel.batchTransactions.collectAsStateWithLifecycle()
+    var selectedBatch by remember { mutableStateOf<kz.abdiyev.walletai.domain.repository.ImportBatch?>(null) }
+    var undoBatch by remember { mutableStateOf<kz.abdiyev.walletai.domain.repository.ImportBatch?>(null) }
+    var onlyReview by remember { mutableStateOf(false) }
 
     val currency = remember(settings.currencyCode) { Currency.fromCode(settings.currencyCode) }
     var statementInputText by remember { mutableStateOf("") }
@@ -116,13 +122,14 @@ fun ImportScreen(
         viewModel.committablePreviews().size
     }
     val skippedPreviews = remember(parsedPreviews, skipTransfers) {
-        parsedPreviews.filter { it.isDuplicate || (skipTransfers && it.isTransfer) }
+        parsedPreviews.filter { (it.isDuplicate && !it.forceImport) || (skipTransfers && it.isTransfer) }
     }
     val committablePreviews = remember(parsedPreviews, skipTransfers) {
-        parsedPreviews.filterNot { it.isDuplicate || (skipTransfers && it.isTransfer) }
+        parsedPreviews.filterNot { (it.isDuplicate && !it.forceImport) || (skipTransfers && it.isTransfer) }
     }
-    val displayPreviews = remember(committablePreviews, skippedPreviews, showSkipped) {
-        if (showSkipped) committablePreviews + skippedPreviews else committablePreviews
+    val displayPreviews = remember(committablePreviews, skippedPreviews, showSkipped, onlyReview) {
+        val visible = if (showSkipped) committablePreviews + skippedPreviews else committablePreviews
+        if (onlyReview) visible.filter { it.needsReview || it.isDuplicate } else visible
     }
 
     val pdfLauncher = rememberLauncherForActivityResult(
@@ -189,9 +196,9 @@ fun ImportScreen(
                         }
                     } else {
                         DarkActionButton(
-                            text = "Добавить $committableCount операций",
+                            text = if (committableCount > 0) "Добавить $committableCount операций" else "Завершить без добавления",
                             onClick = viewModel::commitPreviews,
-                            enabled = committableCount > 0,
+                            enabled = !isParsing,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -213,6 +220,15 @@ fun ImportScreen(
             )
         ) {
             item {
+                OutlinedTextField(
+                    value = accountLabel, onValueChange = viewModel::setAccountLabel,
+                    enabled = uiState is ImportUiState.Idle,
+                    label = { Text("Обозначение счёта (например, основная карта)") },
+                    supportingText = { Text("Для повторных выписок одного счёта используйте то же обозначение. Для другой карты — другое.") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+            }
+            item {
                 StatementImportCard(
                     text = statementInputText,
                     onTextChange = { statementInputText = it },
@@ -227,7 +243,7 @@ fun ImportScreen(
                     onImportPdf = {
                         pdfLauncher.launch(arrayOf("application/pdf"))
                     },
-                    isParsing = isParsing
+                    isParsing = isParsing || isSaving
                 )
             }
 
@@ -267,6 +283,14 @@ fun ImportScreen(
 
             if (parsedPreviews.isNotEmpty()) {
                 item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(checked = onlyReview, onCheckedChange = { onlyReview = it })
+                        Text("Только требующие проверки")
+                    }
+                    Text("Сохранённые покупки и ваши исправления не заменяются. Неизвестные места можно уточнить позже в истории операций.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -292,7 +316,7 @@ fun ImportScreen(
                 }
 
                 items(displayPreviews, key = { it.id }) { preview ->
-                    val skipped = preview.isDuplicate || (skipTransfers && preview.isTransfer)
+                    val skipped = (preview.isDuplicate && !preview.forceImport) || (skipTransfers && preview.isTransfer)
                     ImportPreviewItem(
                         preview = preview,
                         categories = categories,
@@ -300,7 +324,9 @@ fun ImportScreen(
                         incomeColor = financialColors.income,
                         expenseColor = financialColors.expense,
                         onUpdateCategory = { viewModel.updatePreviewCategory(preview.id, it) },
-                        onEdit = { editingPreview = preview }
+                        onEdit = { if (!skipped && !isSaving) editingPreview = preview },
+                        onRemember = { viewModel.rememberMerchant(preview.id) },
+                        onForceImport = { viewModel.setForceImport(preview.id, it) }
                     )
                 }
 
@@ -315,7 +341,43 @@ fun ImportScreen(
                     }
                 }
             }
+            if (importHistory.isNotEmpty()) {
+                item { Text("История импортов", style = MaterialTheme.typography.titleMedium) }
+                items(importHistory, key = { "batch-${it.id}" }) { batch ->
+                    WalletSurfaceCard {
+                        Column {
+                            Text(batch.sourceLabel, fontWeight = FontWeight.Medium)
+                            Text(java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale("ru")).format(java.util.Date(batch.createdAt)))
+                            Text(if (batch.undone) "Импорт отменён" else
+                                "Добавлено ${batch.addedCount} · пропущено ${batch.skippedCount} · требовало проверки ${batch.reviewCount}")
+                            Row {
+                                TextButton(onClick = { viewModel.showBatch(batch.id); selectedBatch = batch }) { Text("Операции") }
+                                if (!batch.undone) TextButton(onClick = { undoBatch = batch }, enabled = !isSaving && !isParsing) { Text("Отменить импорт") }
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    selectedBatch?.let {
+        AlertDialog(onDismissRequest = { selectedBatch = null }, title = { Text("Операции импорта") },
+            text = {
+                LazyColumn {
+                    if (batchTransactions.isEmpty()) item { Text("Нет сохранённых операций") }
+                    items(batchTransactions) { tx ->
+                        Text("${tx.description} · ${MoneyFormatter.format(tx.money)}" + if (tx.needsReview) " · Нужно проверить" else "",
+                            modifier = Modifier.padding(vertical = 6.dp))
+                    }
+                }
+            }, confirmButton = { TextButton(onClick = { selectedBatch = null }) { Text("Закрыть") } })
+    }
+    undoBatch?.let { batch ->
+        AlertDialog(onDismissRequest = { undoBatch = null }, title = { Text("Отменить импорт?") },
+            text = { Text("Будут удалены оставшиеся операции этой загрузки, включая ваши последующие исправления. Покупки других загрузок останутся. Запомненные правила магазинов сохранятся.") },
+            confirmButton = { TextButton(onClick = { viewModel.undoImport(batch.id); undoBatch = null }) { Text("Удалить операции импорта") } },
+            dismissButton = { TextButton(onClick = { undoBatch = null }) { Text("Оставить") } })
     }
 
     editingPreview?.let { preview ->
@@ -464,6 +526,7 @@ private fun ImportSummaryCard(
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium
             )
+            Text("Новых: ${summary.totalRecognized - summary.duplicateCount} · возможных повторов: ${summary.duplicateCount} · нужно проверить: ${summary.reviewCount}")
             Text(
                 text = "Распознано ${summary.totalRecognized} операций: " +
                     "${summary.expenseCount} расходов на ${MoneyFormatter.format(summary.expenseTotal)}, " +
@@ -511,7 +574,9 @@ private fun ImportPreviewItem(
     incomeColor: androidx.compose.ui.graphics.Color,
     expenseColor: androidx.compose.ui.graphics.Color,
     onUpdateCategory: (Long) -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onRemember: () -> Unit,
+    onForceImport: (Boolean) -> Unit
 ) {
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     val selectedCategory = categories.find { it.id == preview.predictedCategoryId }
@@ -527,6 +592,11 @@ private fun ImportPreviewItem(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(preview.description, fontWeight = FontWeight.Medium)
+                    if (preview.description != preview.originalDescription) {
+                        Text("В выписке: ${preview.originalDescription}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (preview.needsReview) Text("Нужно проверить категорию", color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall)
                     Text(
                         text = if (preview.type == TransactionType.INCOME) "Доход" else "Расход",
                         style = MaterialTheme.typography.bodySmall,
@@ -546,14 +616,26 @@ private fun ImportPreviewItem(
                     AssistChip(onClick = {}, label = { Text("перевод") }, enabled = false)
                 }
                 if (preview.isDuplicate) {
-                    AssistChip(onClick = {}, label = { Text("уже импортировано") }, enabled = false)
+                    AssistChip(onClick = {}, label = { Text("возможный повтор") }, enabled = false)
                 }
                 if (skipped && !preview.isDuplicate) {
                     AssistChip(onClick = {}, label = { Text("пропуск") }, enabled = false)
                 }
             }
 
+            if (preview.isDuplicate) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = preview.forceImport, onCheckedChange = onForceImport)
+                    Text("Это другая покупка — добавить")
+                }
+            }
+
             if (!skipped) {
+                TextButton(onClick = onRemember, enabled = !preview.rememberMerchant) {
+                    Text(if (preview.rememberMerchant) "Магазин будет запомнен" else "Запомнить название и категорию для магазина")
+                }
+                Text("Изменения относятся к этой покупке. Запоминание применяет их к новым покупкам этого магазина.",
+                    style = MaterialTheme.typography.bodySmall)
                 Box {
                     AssistChip(
                         onClick = { categoryMenuExpanded = true },
@@ -565,7 +647,7 @@ private fun ImportPreviewItem(
                         expanded = categoryMenuExpanded,
                         onDismissRequest = { categoryMenuExpanded = false }
                     ) {
-                        categories.forEach { category ->
+                        categories.filter { it.type == preview.type }.forEach { category ->
                             DropdownMenuItem(
                                 text = { Text(category.name) },
                                 onClick = {

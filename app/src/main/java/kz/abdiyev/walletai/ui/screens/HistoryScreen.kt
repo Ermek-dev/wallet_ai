@@ -24,6 +24,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -51,9 +53,14 @@ fun HistoryScreen(
     val historyQuery by viewModel.historyQuery.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val saveError by viewModel.saveError.collectAsStateWithLifecycle()
+    var editing by remember { mutableStateOf<kz.abdiyev.walletai.domain.model.TransactionData?>(null) }
+    var onlyReview by remember { mutableStateOf(false) }
 
     val financialColors = WalletAiTheme.financialColors
-    val groupedHistory = remember(searchResults) { groupTransactionsByDay(searchResults) }
+    val groupedHistory = remember(searchResults, onlyReview) {
+        groupTransactionsByDay(if (onlyReview) searchResults.filter { it.needsReview } else searchResults)
+    }
     val dateFormatter = remember { SimpleDateFormat("dd.MM.yyyy", Locale("ru")) }
 
     Scaffold(
@@ -84,6 +91,13 @@ fun HistoryScreen(
             contentPadding = PaddingValues(bottom = 24.dp, top = 8.dp)
         ) {
             item {
+                androidx.compose.material3.FilterChip(
+                    selected = onlyReview, onClick = { onlyReview = !onlyReview },
+                    label = { Text("Нужно проверить (${searchResults.count { it.needsReview }})") }
+                )
+                if (saveError) Text("Не удалось сохранить исправления. Повторите попытку.", color = MaterialTheme.colorScheme.error)
+            }
+            item {
                 OutlinedTextField(
                     value = historyQuery,
                     onValueChange = viewModel::setHistoryQuery,
@@ -110,7 +124,7 @@ fun HistoryScreen(
                         categories = categories,
                         incomeColor = financialColors.income,
                         expenseColor = financialColors.expense,
-                        onTransactionClick = {},
+                        onTransactionClick = { editing = it },
                         onTransactionDelete = {},
                         parseColorHex = ::parseColorHex,
                         showDeleteButton = false
@@ -118,5 +132,16 @@ fun HistoryScreen(
                 }
             }
         }
+    }
+    editing?.let { tx ->
+        TransactionDialog(
+            categories = categories, currency = Currency.fromCode(settings.currencyCode), existing = tx,
+            onDismiss = { editing = null },
+            onConfirm = { money, type, categoryId, description, date ->
+                viewModel.updateTransaction(tx.copy(money = money, type = type, categoryId = categoryId,
+                    description = description, date = date))
+                editing = null
+            }
+        )
     }
 }
