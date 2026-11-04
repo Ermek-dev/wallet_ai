@@ -18,15 +18,15 @@ class StatementCategorizer(
             ?.let { name -> categories.find { it.name.equals(name, ignoreCase = true) }?.id }
             ?.let { return it }
 
-        if (trainedModel != null) {
-            return classifier.classify(raw.description, trainedModel, categories)
-        }
-
         if (shouldUseTransfersCategory(raw) && transfersCategoryId != null) {
             return transfersCategoryId
         }
 
-        return categories.firstOrNull()?.id ?: 0L
+        val matching = categories.filter { it.type == raw.type }
+        if (trainedModel != null && trainedModel.categoryPriors.isNotEmpty()) {
+            return classifier.classify(raw.description, trainedModel, matching)
+        }
+        return matching.find { it.name == "Другое" }?.id ?: matching.firstOrNull()?.id ?: 0L
     }
 
     private fun shouldUseTransfersCategory(raw: RawStatementLine): Boolean {

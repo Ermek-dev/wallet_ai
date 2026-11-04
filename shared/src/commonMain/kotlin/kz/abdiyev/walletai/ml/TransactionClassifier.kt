@@ -27,11 +27,14 @@ class TransactionClassifier {
     )
 
     fun train(transactions: List<TransactionData>, categories: List<CategoryData>): TrainedModel {
-        if (transactions.isEmpty() || categories.isEmpty()) {
+        val confirmed = transactions.filter { tx ->
+            !tx.isAutoCategorized && !tx.needsReview && categories.any { it.id == tx.categoryId }
+        }
+        if (confirmed.isEmpty() || categories.isEmpty()) {
             return TrainedModel(emptyMap(), emptyMap(), emptyMap(), 0, categories.firstOrNull()?.id ?: 0L)
         }
 
-        val totalDocs = transactions.size.toDouble()
+        val totalDocs = confirmed.size.toDouble()
         val categoryCounts = mutableMapOf<Long, Int>()
         val categoryWordCounts = mutableMapOf<Long, Int>()
         val categoryWordFreqs = mutableMapOf<Long, MutableMap<String, Int>>()
@@ -43,7 +46,7 @@ class TransactionClassifier {
             categoryWordFreqs[category.id] = mutableMapOf()
         }
 
-        for (tx in transactions) {
+        for (tx in confirmed) {
             val categoryId = tx.categoryId
             categoryCounts[categoryId] = (categoryCounts[categoryId] ?: 0) + 1
             val wordFreqs = categoryWordFreqs.getValue(categoryId)
