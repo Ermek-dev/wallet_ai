@@ -15,7 +15,9 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -83,22 +85,22 @@ fun Modifier.tiltGlow(
     val alpha = intensity.coerceIn(0f, 1f)
 
     this.drawBehind {
+        val outline = shape.createOutline(size, layoutDirection, this)
         val center = Offset(
             x = size.width / 2f + animatedShift.x,
             y = size.height / 2f + animatedShift.y
         )
         val radius = maxOf(size.width, size.height) * 0.75f
-
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    resolvedColor.copy(alpha = alpha),
-                    resolvedColor.copy(alpha = alpha * 0.35f),
-                    Color.Transparent
-                ),
-                center = center,
-                radius = radius
-            )
+        val brush = Brush.radialGradient(
+            colors = listOf(
+                resolvedColor.copy(alpha = alpha),
+                resolvedColor.copy(alpha = alpha * 0.35f),
+                Color.Transparent
+            ),
+            center = center,
+            radius = radius
         )
+        val clipPath = Path().apply { addOutline(outline) }
+        drawPath(path = clipPath, brush = brush)
     }
 }

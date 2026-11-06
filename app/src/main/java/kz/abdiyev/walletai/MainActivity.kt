@@ -44,6 +44,7 @@ import kz.abdiyev.walletai.ui.components.TiltGlowProvider
 import kz.abdiyev.walletai.ui.components.rememberDynamicTiltOffset
 import kz.abdiyev.walletai.ui.components.tiltGlow
 import kz.abdiyev.walletai.ui.navigation.WalletAiRoutes
+import kz.abdiyev.walletai.ui.theme.CardShape
 import kz.abdiyev.walletai.ui.screens.AdvisorScreen
 import kz.abdiyev.walletai.ui.screens.AnalyticsScreen
 import kz.abdiyev.walletai.ui.screens.DashboardScreen
@@ -139,7 +140,11 @@ fun MainAppScreen() {
             bottomBar = {
                 if (showBottomBar) {
                     NavigationBar(
-                        modifier = Modifier.tiltGlow(intensity = 0.15f, maxShiftDp = 4.dp),
+                        modifier = Modifier.tiltGlow(
+                            shape = CardShape,
+                            intensity = 0.15f,
+                            maxShiftDp = 4.dp
+                        ),
                         containerColor = MaterialTheme.colorScheme.background,
                         tonalElevation = 0.dp
                     ) {
